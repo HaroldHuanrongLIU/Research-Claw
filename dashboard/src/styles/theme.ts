@@ -122,6 +122,21 @@ export function getAntdThemeConfig(mode: 'dark' | 'light'): ThemeConfig {
       Input: {
         borderRadius: 8,
       },
+      Switch: {
+        // On-state carries the semantic "enabled/healthy" green instead of brand red,
+        // so a toggle's state is legible at a glance in both themes.
+        colorPrimary: tokens.accent.green,
+        colorPrimaryHover: mode === 'dark' ? '#34D399' : '#047857',
+      },
+      Segmented: {
+        // Default selected-thumb contrast is near-invisible on RC's ultra-dark and
+        // warm-paper surfaces; sink the track and lift the thumb so the selection reads.
+        trackBg: tokens.bg.primary,
+        itemSelectedBg: tokens.bg.surfaceHover,
+        itemSelectedColor: tokens.text.primary,
+        itemColor: tokens.text.secondary,
+        itemHoverColor: tokens.text.primary,
+      },
     },
   };
 }

@@ -7,9 +7,9 @@ import {
   Divider,
   Input,
   Radio,
-  Segmented,
   Select,
   Spin,
+  Switch,
   Tooltip,
   Typography,
 } from 'antd';
@@ -1581,15 +1581,7 @@ export default function SettingsPanel() {
       <Divider style={{ margin: '4px 0 8px' }} />
 
       <SettingRow label={t('settings.enableVision')} description={!visionEnabled ? t('settings.visionModelHint') : undefined}>
-        <Segmented
-          value={visionEnabled ? 'on' : 'off'}
-          onChange={(v) => setVisionEnabled(v === 'on')}
-          options={[
-            { label: 'OFF', value: 'off' },
-            { label: 'ON', value: 'on' },
-          ]}
-          size="small"
-        />
+        <Switch checked={visionEnabled} onChange={setVisionEnabled} size="small" />
       </SettingRow>
 
       {visionEnabled && (
@@ -1705,15 +1697,7 @@ export default function SettingsPanel() {
       <Divider style={{ margin: '4px 0 8px' }} />
 
       <SettingRow label={t('settings.webSearch')} description={t('settings.webSearchHint')}>
-        <Segmented
-          value={webSearchEnabled ? 'on' : 'off'}
-          onChange={(v) => setWebSearchEnabled(v === 'on')}
-          options={[
-            { label: 'OFF', value: 'off' },
-            { label: 'ON', value: 'on' },
-          ]}
-          size="small"
-        />
+        <Switch checked={webSearchEnabled} onChange={setWebSearchEnabled} size="small" />
       </SettingRow>
 
       {webSearchEnabled && (
@@ -1757,15 +1741,7 @@ export default function SettingsPanel() {
       <Divider style={{ margin: '4px 0 8px' }} />
 
       <SettingRow label={t('settings.proxyEnabled')}>
-        <Segmented
-          value={proxyEnabled ? 'on' : 'off'}
-          onChange={(v) => setProxyEnabled(v === 'on')}
-          options={[
-            { label: 'OFF', value: 'off' },
-            { label: 'ON', value: 'on' },
-          ]}
-          size="small"
-        />
+        <Switch checked={proxyEnabled} onChange={setProxyEnabled} size="small" />
       </SettingRow>
 
       {proxyEnabled && (
@@ -1784,15 +1760,7 @@ export default function SettingsPanel() {
       <Divider style={{ margin: '4px 0 8px' }} />
 
       <SettingRow label={t('settings.heartbeat')} description={t('settings.heartbeatHint')}>
-        <Segmented
-          value={heartbeatEnabled ? 'on' : 'off'}
-          onChange={(v) => setHeartbeatEnabled(v === 'on')}
-          options={[
-            { label: 'OFF', value: 'off' },
-            { label: 'ON', value: 'on' },
-          ]}
-          size="small"
-        />
+        <Switch checked={heartbeatEnabled} onChange={setHeartbeatEnabled} size="small" />
       </SettingRow>
 
       {heartbeatEnabled && (
@@ -1817,16 +1785,11 @@ export default function SettingsPanel() {
       <Divider style={{ margin: '4px 0 8px' }} />
 
       <SettingRow label={t('settings.supervisor')} description={t('settings.supervisorHint')}>
-        <Segmented
-          value={supervisorEnabled ? 'on' : 'off'}
-          onChange={(v) => {
-            const enabled = v === 'on';
+        <Switch
+          checked={supervisorEnabled}
+          onChange={(enabled) => {
             setSupervisorEnabled(enabled);
           }}
-          options={[
-            { label: 'OFF', value: 'off' },
-            { label: 'ON', value: 'on' },
-          ]}
           size="small"
         />
       </SettingRow>
@@ -2077,15 +2040,7 @@ export default function SettingsPanel() {
           </SettingRow>
 
           <SettingRow label={t('settings.appendReviewToChannelOutput')} description={t('settings.appendReviewToChannelOutputHint')}>
-            <Segmented
-              value={appendReviewToChannelOutput ? 'on' : 'off'}
-              onChange={(v) => setAppendReviewToChannelOutput(v === 'on')}
-              options={[
-                { label: 'OFF', value: 'off' },
-                { label: 'ON', value: 'on' },
-              ]}
-              size="small"
-            />
+            <Switch checked={appendReviewToChannelOutput} onChange={setAppendReviewToChannelOutput} size="small" />
           </SettingRow>
 
           <SettingRow
@@ -2116,15 +2071,7 @@ export default function SettingsPanel() {
           </SettingRow>
 
           <SettingRow label={t('settings.forceRegenerate')} description={t('settings.forceRegenerateHint')}>
-            <Segmented
-              value={forceRegenerate ? 'on' : 'off'}
-              onChange={(v) => setForceRegenerate(v === 'on')}
-              options={[
-                { label: 'OFF', value: 'off' },
-                { label: 'ON', value: 'on' },
-              ]}
-              size="small"
-            />
+            <Switch checked={forceRegenerate} onChange={setForceRegenerate} size="small" />
           </SettingRow>
 
           {forceRegenerate && (
@@ -2248,27 +2195,11 @@ export default function SettingsPanel() {
       <Divider style={{ margin: '12px 0 8px' }} />
 
       <SettingRow label={t('settings.showSystemFiles')} description={t('settings.showSystemFilesHint')}>
-        <Segmented
-          value={showSystemFiles ? 'on' : 'off'}
-          onChange={(v) => setShowSystemFiles(v === 'on')}
-          options={[
-            { label: 'OFF', value: 'off' },
-            { label: 'ON', value: 'on' },
-          ]}
-          size="small"
-        />
+        <Switch checked={showSystemFiles} onChange={setShowSystemFiles} size="small" />
       </SettingRow>
 
       <SettingRow label={t('settings.notificationSound')} description={t('settings.notificationSoundHint')}>
-        <Segmented
-          value={notificationSoundEnabled ? 'on' : 'off'}
-          onChange={(v) => setNotificationSoundEnabled(v === 'on')}
-          options={[
-            { label: 'OFF', value: 'off' },
-            { label: 'ON', value: 'on' },
-          ]}
-          size="small"
-        />
+        <Switch checked={notificationSoundEnabled} onChange={setNotificationSoundEnabled} size="small" />
       </SettingRow>
 
       <Divider style={{ margin: '12px 0 8px' }} />
