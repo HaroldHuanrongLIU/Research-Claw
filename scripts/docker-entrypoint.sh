@@ -228,7 +228,9 @@ node -e "
 # instead of npm install (avoids silent network failures in China/offline).
 IMAGE_RP_VER=$(cat /defaults/rp-version.txt 2>/dev/null || true)
 VOL_RP_VER=$(node -e "console.log(require('/root/.openclaw/extensions/research-plugins/package.json').version)" 2>/dev/null || true)
-if [ -n "$IMAGE_RP_VER" ] && [ "$IMAGE_RP_VER" != "$VOL_RP_VER" ]; then
+# Guard on /defaults/research-plugins existing: never rm a good volume install
+# when the baked source is missing (would leave SkillSearch permanently broken).
+if [ -d /defaults/research-plugins ] && [ -n "$IMAGE_RP_VER" ] && [ "$IMAGE_RP_VER" != "$VOL_RP_VER" ]; then
   echo "[research-claw] Updating research-plugins: ${VOL_RP_VER:-none} → $IMAGE_RP_VER"
   mkdir -p /root/.openclaw/extensions
   rm -rf /root/.openclaw/extensions/research-plugins

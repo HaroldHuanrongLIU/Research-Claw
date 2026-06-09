@@ -101,22 +101,20 @@ COPY . .
 RUN pnpm build
 
 # ── research-plugins (skills + indexes + agent tools via OC plugin) ───
-# Installed to ~/.openclaw/extensions/ (not node_modules).
-# Use a minimal temp config to avoid chicken-and-egg issues with OC
-# plugin validation during install.
-RUN echo '{}' > /tmp/oc-install.json && \
-    OPENCLAW_CONFIG_PATH=/tmp/oc-install.json \
-    node ./node_modules/openclaw/dist/entry.js \
-    plugins install @wentorai/research-plugins && \
-    rm /tmp/oc-install.json
-
-# Bake research-plugins to /defaults/ so rc-state volume doesn't shadow them.
-# The volume mounts at /root/.openclaw and hides the image's baked install.
-# Entrypoint copies from /defaults/ to the volume (instant, no network needed).
-RUN mkdir -p /defaults && \
-    cp -a /root/.openclaw/extensions/research-plugins /defaults/research-plugins && \
+# Bake to /defaults/ so the rc-state volume (mounts at /root/.openclaw) does
+# not shadow it. Entrypoint copies /defaults/research-plugins → the volume on
+# first boot / version change (instant, no network needed at runtime).
+# `openclaw plugins install` (OC 2026.6.1) installs into a temp npm projects
+# dir, NOT ~/.openclaw/extensions, so extract the npm tarball directly —
+# deterministic and offline-safe. Fail the build if catalog.json is missing.
+RUN mkdir -p /defaults/research-plugins && cd /tmp && \
+    npm pack @wentorai/research-plugins && \
+    tar xzf wentorai-research-plugins-*.tgz -C /defaults/research-plugins --strip-components=1 && \
+    rm -f wentorai-research-plugins-*.tgz && \
+    test -f /defaults/research-plugins/catalog.json && \
     node -e "process.stdout.write(require('/defaults/research-plugins/package.json').version)" \
-    > /defaults/rp-version.txt 2>/dev/null || echo "unknown" > /defaults/rp-version.txt
+    > /defaults/rp-version.txt && \
+    echo "[build] baked research-plugins $(cat /defaults/rp-version.txt) with catalog.json"
 
 # 烘焙配置模板 + 系统提示词到 /defaults/，entrypoint 会同步到 volume
 RUN mkdir -p /defaults/bootstrap-prompts && \
