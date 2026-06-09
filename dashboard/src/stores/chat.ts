@@ -110,9 +110,14 @@ function detectRunEndedWithoutReply(messages: ChatMessage[]): boolean {
 
 function clearActiveRunState(): Pick<
   ChatState,
-  'streaming' | 'compacting' | 'streamText' | 'runId' | '_streamStartedAt' | '_lastDeltaAt' | '_reconnectedAt'
+  'sending' | 'streaming' | 'compacting' | 'streamText' | 'runId' | '_streamStartedAt' | '_lastDeltaAt' | '_reconnectedAt'
 > {
   return {
+    // `sending` is part of active-run state: it gates the composer
+    // (disabled={!isConnected || sending}). A run that fails fast can emit its
+    // error/final event before chat.send's ack flips sending→false, so any
+    // run-ending reset must clear it too — otherwise the input stays disabled.
+    sending: false,
     streaming: false,
     compacting: false,
     streamText: null,

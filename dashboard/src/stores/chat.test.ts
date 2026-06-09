@@ -399,6 +399,22 @@ describe('Chat store', () => {
 
         expect(useChatStore.getState().lastError).toMatch(/run ended without|没有生成回复|no reply/i);
       });
+
+      it('clears sending when error arrives before chat.send ack (fast-fail race)', () => {
+        // Race: gateway emits the run error before the chat.send response frame
+        // flips sending→false (chat.ts:957). Without clearing sending here, the
+        // composer textarea stays disabled={!isConnected || sending} forever.
+        useChatStore.setState({ runId: 'run-1', sending: true, streaming: false });
+
+        useChatStore.getState().handleChatEvent({
+          runId: 'run-1',
+          sessionKey: 'main',
+          state: 'error',
+          errorMessage: 'Model overloaded',
+        });
+
+        expect(useChatStore.getState().sending).toBe(false);
+      });
     });
   });
 
