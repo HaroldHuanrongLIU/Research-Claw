@@ -241,12 +241,16 @@ fi
 RC_DIR=/app/workspace/.ResearchClaw
 BP=/defaults/bootstrap-prompts
 mkdir -p "$RC_DIR"
-# L1 system prompts: always force-update from image (safe — no user data).
-# Also sync to workspace root — OC's heartbeat system reads workspace/HEARTBEAT.md
-# directly (not .ResearchClaw/), and the pnpm patch doesn't cover health-DSTtGBUV.js.
+# L1 system prompts: always force-update the .ResearchClaw/ canonical copy from
+# the image (safe — no user data).
 for f in AGENTS.md HEARTBEAT.md; do
-  [ -f "$BP/$f" ] && cp "$BP/$f" "$RC_DIR/$f" && cp "$BP/$f" /app/workspace/$f
+  [ -f "$BP/$f" ] && cp "$BP/$f" "$RC_DIR/$f"
 done
+# Only HEARTBEAT.md is mirrored to the workspace root — OC's heartbeat system
+# reads workspace/HEARTBEAT.md directly and the pnpm patch doesn't cover
+# health-DSTtGBUV.js. AGENTS.md (and the other relocatable prompts) get a
+# workspace-root SYMLINK from migratePromptFiles() instead.
+[ -f "$BP/HEARTBEAT.md" ] && cp "$BP/HEARTBEAT.md" /app/workspace/HEARTBEAT.md
 # L3 user-owned files: only initialize if missing (never overwrite user customizations).
 for f in SOUL.md IDENTITY.md TOOLS.md USER.md; do
   [ ! -f "$RC_DIR/$f" ] && [ -f "$BP/$f.example" ] && cp "$BP/$f.example" "$RC_DIR/$f"
@@ -256,7 +260,10 @@ if [ ! -f "$RC_DIR/BOOTSTRAP.md" ] && [ ! -f "$RC_DIR/BOOTSTRAP.md.done" ] && [ 
   cp "$BP/BOOTSTRAP.md.example" "$RC_DIR/BOOTSTRAP.md"
 fi
 [ ! -f /app/workspace/MEMORY.md ] && [ -f "$BP/MEMORY.md.example" ] && cp "$BP/MEMORY.md.example" /app/workspace/MEMORY.md
-[ ! -f /app/workspace/USER.md ] && [ -f "$BP/ws-USER.md.example" ] && cp "$BP/ws-USER.md.example" /app/workspace/USER.md
+# NOTE: do NOT seed a root workspace/USER.md — USER.md is relocatable, so
+# migratePromptFiles() seeds .ResearchClaw/USER.md and leaves a root symlink.
+# A real root file would only be renamed to .bak by the migration. ($BP still
+# carries an unused ws-USER.md.example from the image build — harmless vestige.)
 
 # Token: config file is source of truth; env var is a convenience override.
 # Override via env: docker run -e OPENCLAW_GATEWAY_TOKEN=your-secret ...

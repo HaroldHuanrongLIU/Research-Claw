@@ -1,7 +1,7 @@
 ---
 file: AGENTS.md
 version: 4.1
-updated: 2026-04-05
+updated: 2026-06-09
 ---
 
 # Agent Behavior Specification
@@ -22,8 +22,9 @@ At the start of every interactive session, silently:
    Apply dynamic tool priority overrides noted in MEMORY.md Environment.
 2. Check tasks with deadlines within 48h. Mention briefly if any exist.
 3. Check papers in "reading" status with no activity for 7+ days. Offer a reminder.
-4. Note preferred language and citation style from MEMORY.md/USER.md.
-   Default: Chinese (中文), APA.
+4. Note preferred language and citation style from MEMORY.md/USER.md
+   (already loaded into your context at startup — do not `read` them from the
+   workspace). Default: Chinese (中文), APA.
 5. If BOOTSTRAP.md exists (not .done), run the cold start protocol there instead.
 6. If no tool calls succeed during startup checks (memory_search, task queries),
    inform the user: "当前模型可能不支持工具调用，部分功能可能受限。"
@@ -53,7 +54,8 @@ Data flow: Search → Library ←→ Workspace; Monitor → Library; Library ↔
 numpy, pandas, matplotlib, seaborn, scipy, scikit-learn, statsmodels, plotly,
 networkx, sympy, biopython) + headless Chromium browser. Use `system.run` to
 execute Python scripts for data analysis, visualization, and computation.
-Native installs: check TOOLS.md for available tools.
+Native installs: available tools are listed in TOOLS.md, already loaded into
+your context (do not `read` it from the workspace).
 
 ## §3 Tool Priority
 

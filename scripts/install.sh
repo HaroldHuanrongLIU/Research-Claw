@@ -874,12 +874,13 @@ else
 fi
 DASHBOARD_URL="http://$DASHBOARD_IP:$PORT"
 
-# --- Sync L1 bootstrap files to workspace root ---
+# --- Sync HEARTBEAT.md to workspace root ---
 # OC's heartbeat system reads workspace/HEARTBEAT.md directly (not .ResearchClaw/).
+# Only HEARTBEAT.md is mirrored to root; the other relocatable prompts
+# (AGENTS/SOUL/TOOLS/IDENTITY/USER/BOOTSTRAP) get a workspace-root SYMLINK from
+# migratePromptFiles() — cp'ing them here would only get renamed to .bak.
 RC_DIR="workspace/.ResearchClaw"
-for f in AGENTS.md HEARTBEAT.md; do
-  [ -f "$RC_DIR/$f" ] && cp "$RC_DIR/$f" "workspace/$f"
-done
+[ -f "$RC_DIR/HEARTBEAT.md" ] && cp "$RC_DIR/HEARTBEAT.md" "workspace/HEARTBEAT.md"
 
 # --- Initialize L2/L3 bootstrap runtime files from .example templates ---
 for f in SOUL.md IDENTITY.md TOOLS.md USER.md; do
@@ -888,8 +889,9 @@ for f in SOUL.md IDENTITY.md TOOLS.md USER.md; do
 done
 [ ! -f "workspace/MEMORY.md" ] && [ -f "workspace/MEMORY.md.example" ] && \
   cp "workspace/MEMORY.md.example" "workspace/MEMORY.md"
-[ ! -f "workspace/USER.md" ] && [ -f "workspace/USER.md.example" ] && \
-  cp "workspace/USER.md.example" "workspace/USER.md"
+# NOTE: do NOT seed a root workspace/USER.md — migratePromptFiles() seeds
+# .ResearchClaw/USER.md and leaves a root symlink; a real root file would only
+# be renamed to .bak by the migration.
 [ ! -f "$RC_DIR/BOOTSTRAP.md" ] && [ ! -f "$RC_DIR/BOOTSTRAP.md.done" ] && [ -f "$RC_DIR/BOOTSTRAP.md.example" ] && \
   cp "$RC_DIR/BOOTSTRAP.md.example" "$RC_DIR/BOOTSTRAP.md"
 

@@ -338,6 +338,115 @@ describe('WorkspaceService', () => {
     });
   });
 
+  // ── migratePromptFiles: workspace-root symlinks ────────────────────
+  //
+  // After migration each relocatable prompt file must be reachable at its
+  // workspace-root path (so OC-native `read` / heartbeat preflight resolve it),
+  // backed by a relative symlink into .ResearchClaw/. Regression guard for the
+  // USER.md ENOENT class (root copy was previously renamed to .bak).
+
+  describe('migratePromptFiles (root symlinks)', () => {
+    const RELOCATABLE = [
+      'AGENTS.md', 'SOUL.md', 'TOOLS.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md',
+    ];
+
+    it('leaves a relative root symlink when the canonical copy already exists', async () => {
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      fs.mkdirSync(rcDir, { recursive: true });
+      fs.writeFileSync(path.join(rcDir, 'USER.md'), 'user prefs');
+
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+
+      const rootPath = path.join(tmpDir, 'USER.md');
+      const st = fs.lstatSync(rootPath);
+      expect(st.isSymbolicLink()).toBe(true);
+      const target = fs.readlinkSync(rootPath);
+      expect(path.isAbsolute(target)).toBe(false);
+      expect(target).toContain('.ResearchClaw');
+      expect(target.endsWith('USER.md')).toBe(true);
+    });
+
+    it('makes the root path readable via native fs through the symlink', async () => {
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      fs.mkdirSync(rcDir, { recursive: true });
+      fs.writeFileSync(path.join(rcDir, 'USER.md'), 'group meeting: Friday');
+
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+
+      // The exact failure mode of the original bug: a plain fs read of the
+      // workspace-root path must succeed (not ENOENT).
+      const viaRoot = fs.readFileSync(path.join(tmpDir, 'USER.md'), 'utf-8');
+      expect(viaRoot).toBe('group meeting: Friday');
+    });
+
+    it('moves a real root file into .ResearchClaw/ and replaces it with a symlink', async () => {
+      fs.writeFileSync(path.join(tmpDir, 'SOUL.md'), 'soul content');
+
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+
+      const rcCopy = path.join(tmpDir, '.ResearchClaw', 'SOUL.md');
+      expect(fs.existsSync(rcCopy)).toBe(true);
+      expect(fs.readFileSync(rcCopy, 'utf-8')).toBe('soul content');
+
+      const rootPath = path.join(tmpDir, 'SOUL.md');
+      expect(fs.lstatSync(rootPath).isSymbolicLink()).toBe(true);
+      expect(fs.readFileSync(rootPath, 'utf-8')).toBe('soul content');
+    });
+
+    it('preserves a stale real root file as .bak when canonical already exists', async () => {
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      fs.mkdirSync(rcDir, { recursive: true });
+      fs.writeFileSync(path.join(rcDir, 'AGENTS.md'), 'canonical');
+      fs.writeFileSync(path.join(tmpDir, 'AGENTS.md'), 'stale root');
+
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+
+      const rootPath = path.join(tmpDir, 'AGENTS.md');
+      expect(fs.lstatSync(rootPath).isSymbolicLink()).toBe(true);
+      expect(fs.readFileSync(rootPath, 'utf-8')).toBe('canonical');
+      // The displaced real file is preserved, not destroyed.
+      expect(fs.readFileSync(rootPath + '.bak', 'utf-8')).toBe('stale root');
+    });
+
+    it('is idempotent across repeated init()', async () => {
+      const rcDir = path.join(tmpDir, '.ResearchClaw');
+      fs.mkdirSync(rcDir, { recursive: true });
+      fs.writeFileSync(path.join(rcDir, 'TOOLS.md'), 'tools');
+
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+      svc.destroy();
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+
+      const rootPath = path.join(tmpDir, 'TOOLS.md');
+      expect(fs.lstatSync(rootPath).isSymbolicLink()).toBe(true);
+      expect(fs.readFileSync(rootPath, 'utf-8')).toBe('tools');
+      // No spurious .bak churn from the second pass.
+      expect(fs.existsSync(rootPath + '.bak')).toBe(false);
+    });
+
+    it('does not create a dangling symlink when the file exists nowhere', async () => {
+      svc = new WorkspaceService(makeConfig(tmpDir));
+      await svc.init();
+
+      for (const f of RELOCATABLE) {
+        const rootPath = path.join(tmpDir, f);
+        // Either absent entirely, or (if present) not a broken/dangling link.
+        if (fs.existsSync(rootPath) === false) {
+          // lstat would still see a dangling symlink; assert there is none.
+          let lst: fs.Stats | null = null;
+          try { lst = fs.lstatSync(rootPath); } catch { lst = null; }
+          expect(lst).toBeNull();
+        }
+      }
+    });
+  });
+
   // ── history / diff / restore (no-git fallback) ─────────────────────
 
   describe('history / diff / restore (no git)', () => {

@@ -517,10 +517,23 @@ export class WorkspaceService {
   }
 
   /**
-   * Migrate prompt files from workspace root to .ResearchClaw/ subdirectory.
+   * Migrate prompt files from workspace root to .ResearchClaw/ subdirectory,
+   * then leave a relative symlink at the workspace root pointing back to the
+   * canonical copy (workspace/USER.md -> .ResearchClaw/USER.md).
    *
-   * Idempotent: skips files that already exist in .ResearchClaw/.
-   * Only moves files that physically exist at root AND are not yet in the subdirectory.
+   * Why the symlink: these files are injected into the agent context via the
+   * agent:bootstrap hook, so the agent should never need to read them. But OC's
+   * native `read` tool (and any prompt/skill that references the root path) has
+   * no .ResearchClaw/ fallback — once the root copy was renamed to .bak it would
+   * ENOENT. A symlink makes the root path resolve to the canonical copy for
+   * every consumer, eliminating that whole class of failure (defense-in-depth).
+   *
+   * Idempotent: a correct symlink is left untouched; a pre-existing real file is
+   * preserved as .bak before being replaced. Cross-platform note: symlink
+   * creation always succeeds on the supported install paths (macOS native, and
+   * Windows via the Linux Docker container). If it ever fails (e.g. native
+   * Windows without Developer Mode), it degrades gracefully — the root path
+   * stays absent and the bootstrap hook still supplies the content.
    */
   private async migratePromptFiles(): Promise<void> {
     const rcDir = path.join(this.root, '.ResearchClaw');
@@ -529,31 +542,40 @@ export class WorkspaceService {
       const rootPath = path.join(this.root, filename);
       const destPath = path.join(rcDir, filename);
 
+      let destExists = false;
       try {
-        // Skip if destination already exists (already migrated)
         await fsp.access(destPath, fs.constants.F_OK);
-        // Already migrated — rename stale root copy to .bak if still present.
-        // Uses .bak instead of delete so OC internal code paths that might
-        // read from root get a graceful file-not-found rather than crashing.
-        try {
-          await fsp.access(rootPath, fs.constants.F_OK);
-          const bakPath = rootPath + '.bak';
-          await fsp.rename(rootPath, bakPath);
-        } catch {
-          // No stale root copy (or already .bak'd) — nothing to do
-        }
-        continue;
+        destExists = true;
       } catch {
-        // destPath does not exist — check if source exists at root
+        // destPath does not exist yet
       }
 
-      try {
-        await fsp.access(rootPath, fs.constants.F_OK);
-        // Source exists at root, destination missing → move
-        await fsp.rename(rootPath, destPath);
-      } catch {
-        // Source doesn't exist at root either — nothing to migrate
+      if (!destExists) {
+        // Canonical copy not yet in .ResearchClaw/. Move a real root file in;
+        // if the root entry is a (now-dangling) symlink or nothing, there is
+        // nothing to migrate — drop a stale symlink so it can't shadow later.
+        let st: fs.Stats | null = null;
+        try {
+          st = await fsp.lstat(rootPath);
+        } catch {
+          st = null;
+        }
+        if (st && st.isFile() && !st.isSymbolicLink()) {
+          await fsp.rename(rootPath, destPath);
+        } else {
+          if (st && st.isSymbolicLink()) {
+            try {
+              await fsp.unlink(rootPath);
+            } catch {
+              // ignore
+            }
+          }
+          continue;
+        }
       }
+
+      // Canonical copy now lives in .ResearchClaw/ — point the root path at it.
+      await this.linkRootToSubdir(filename);
     }
 
     // Also handle BOOTSTRAP.md.done (renamed after first-run onboarding)
@@ -568,6 +590,66 @@ export class WorkspaceService {
       } catch {
         // Neither exists
       }
+    }
+  }
+
+  /**
+   * Point workspace/<filename> at .ResearchClaw/<filename> via a relative
+   * symlink. Idempotent and non-destructive:
+   * - a correct existing symlink is left as-is;
+   * - a wrong symlink is replaced;
+   * - a pre-existing real file is preserved as .bak (or removed if a .bak
+   *   already holds the prior backup) before the symlink is created;
+   * - if symlink creation is not permitted (native Windows without Developer
+   *   Mode), it degrades silently — the bootstrap hook still injects content.
+   * The target is relative so the link survives the workspace being moved.
+   */
+  private async linkRootToSubdir(filename: string): Promise<void> {
+    const rootPath = path.join(this.root, filename);
+    const relTarget = path.join('.ResearchClaw', filename);
+
+    let st: fs.Stats | null = null;
+    try {
+      st = await fsp.lstat(rootPath);
+    } catch {
+      st = null;
+    }
+
+    if (st) {
+      if (st.isSymbolicLink()) {
+        try {
+          const cur = await fsp.readlink(rootPath);
+          if (cur === relTarget) return; // already correct
+        } catch {
+          // unreadable link — fall through to replace
+        }
+        try {
+          await fsp.unlink(rootPath);
+        } catch {
+          return; // cannot replace — leave as-is rather than risk data loss
+        }
+      } else {
+        // Real file/dir at root — preserve as .bak, but never clobber an
+        // existing backup (the canonical copy already lives in .ResearchClaw/).
+        const bakPath = rootPath + '.bak';
+        try {
+          await fsp.access(bakPath, fs.constants.F_OK);
+          await fsp.rm(rootPath, { force: true, recursive: true });
+        } catch {
+          try {
+            await fsp.rename(rootPath, bakPath);
+          } catch {
+            return;
+          }
+        }
+      }
+    }
+
+    try {
+      await fsp.symlink(relTarget, rootPath);
+    } catch {
+      // Graceful degradation (e.g. EPERM on native Windows without Dev Mode).
+      // Root path stays absent; content is still provided via agent:bootstrap.
     }
   }
 

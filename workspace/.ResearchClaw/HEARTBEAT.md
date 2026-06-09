@@ -1,7 +1,7 @@
 ---
 file: HEARTBEAT.md
-version: 2.1
-updated: 2026-03-20
+version: 2.2
+updated: 2026-06-09
 ---
 
 # Heartbeat -- Periodic Research Check
@@ -21,7 +21,8 @@ Output a single `progress_card` in JSON format summarizing all findings.
 
 ### 1. Deadline Check [configurable: window = 48 hours]
 
-- Query `task_list` for tasks with deadlines within the configured window.
+- Use the `task_list` tool (it is a tool, not a file — do not try to `read` it)
+  to query tasks with deadlines within the configured window.
 - For each upcoming task:
   - If deadline is within 24 hours: label as **URGENT**.
   - If deadline is within 48 hours: label as **APPROACHING**.
@@ -29,7 +30,8 @@ Output a single `progress_card` in JSON format summarizing all findings.
 
 ### 2. Group Meeting Prep Check
 
-- Read USER.md for group meeting schedule.
+- USER.md is already loaded into your context at startup — use the group-meeting
+  schedule from it directly. Do not `read` a USER.md file from the workspace.
 - If a group meeting falls within the next 7 days:
   - Note it in the progress_card highlights.
   - If within 2 days: flag as needing preparation.
@@ -47,8 +49,9 @@ schedule (default: first heartbeat after 09:00 local time each day).
 
 ### 4. Reading Reminders [configurable: stale_threshold = 7 days]
 
-- Query `library_reading_stats` and check for papers with status "reading"
-  and no activity for longer than the stale threshold.
+- Use the `library_reading_stats` tool (it is a tool, not a file — do not try to
+  `read` it) and check for papers with status "reading" and no activity for
+  longer than the stale threshold.
 - For each stale paper, note it in highlights.
 
 ### 5. Monitor Scan Status

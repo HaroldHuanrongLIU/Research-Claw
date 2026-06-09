@@ -165,16 +165,17 @@ fi
 # Strips invalid channels.*.commands for OC 2026.6.1+.
 "$GW_NODE" "$(dirname "$0")/sync-global-config.cjs" 2>/dev/null || true
 
-# --- Sync L1 bootstrap files to workspace root ---
+# --- Sync HEARTBEAT.md to workspace root ---
 # OC's heartbeat system reads workspace/HEARTBEAT.md directly (not .ResearchClaw/).
 # The pnpm patch covers loadWorkspaceBootstrapFiles but not resolveHeartbeatPreflight
 # in health-DSTtGBUV.js. Syncing on every startup keeps both locations fresh.
 # NOTE: HEARTBEAT.md is excluded from RELOCATABLE_PROMPT_FILES in service.ts
 # so that migratePromptFiles() does not rename this root copy to .bak.
+# The other relocatable files (AGENTS/SOUL/TOOLS/IDENTITY/USER/BOOTSTRAP) get a
+# workspace-root SYMLINK created by migratePromptFiles() — do NOT cp them here,
+# or cp would copy the .ResearchClaw/ source onto its own symlink target.
 RC_DIR="workspace/.ResearchClaw"
-for f in AGENTS.md HEARTBEAT.md; do
-  [ -f "$RC_DIR/$f" ] && cp "$RC_DIR/$f" "workspace/$f"
-done
+[ -f "$RC_DIR/HEARTBEAT.md" ] && cp "$RC_DIR/HEARTBEAT.md" "workspace/HEARTBEAT.md"
 
 # --- Initialize L2/L3 bootstrap runtime files from .example templates ---
 # L1 (AGENTS, HEARTBEAT) are synced above.
@@ -185,8 +186,10 @@ for f in SOUL.md IDENTITY.md TOOLS.md USER.md; do
 done
 [ ! -f "workspace/MEMORY.md" ] && [ -f "workspace/MEMORY.md.example" ] && \
   cp "workspace/MEMORY.md.example" "workspace/MEMORY.md" && echo "[run] MEMORY.md initialized from template"
-[ ! -f "workspace/USER.md" ] && [ -f "workspace/USER.md.example" ] && \
-  cp "workspace/USER.md.example" "workspace/USER.md" && echo "[run] USER.md initialized from template"
+# NOTE: do NOT seed a root workspace/USER.md here. USER.md is relocatable —
+# migratePromptFiles() seeds .ResearchClaw/USER.md (above) and leaves a root
+# symlink pointing to it. Seeding a real root file would only get renamed to
+# .bak by the migration, leaving a confusing remnant.
 # BOOTSTRAP.md: only create if onboarding not yet completed (.done doesn't exist)
 [ ! -f "$RC_DIR/BOOTSTRAP.md" ] && [ ! -f "$RC_DIR/BOOTSTRAP.md.done" ] && [ -f "$RC_DIR/BOOTSTRAP.md.example" ] && \
   cp "$RC_DIR/BOOTSTRAP.md.example" "$RC_DIR/BOOTSTRAP.md" && echo "[run] BOOTSTRAP.md initialized (first run)"

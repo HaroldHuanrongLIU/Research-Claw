@@ -243,7 +243,7 @@ describe('WorkspaceService CRUD fixes', () => {
   // ── migratePromptFiles stale root cleanup ─────────────────────────
 
   describe('migratePromptFiles stale root cleanup', () => {
-    it('renames stale root files to .bak when .ResearchClaw/ copy exists', async () => {
+    it('replaces a stale root file with a symlink and preserves the original as .bak', async () => {
       svc = new WorkspaceService(makeConfig(tmpDir));
       // Pre-populate: simulate already-migrated state with stale root leftover
       const rcDir = path.join(tmpDir, '.ResearchClaw');
@@ -255,30 +255,32 @@ describe('WorkspaceService CRUD fixes', () => {
 
       await svc.init(); // triggers migratePromptFiles()
 
-      // Root originals should be renamed to .bak
-      expect(fs.existsSync(path.join(tmpDir, 'AGENTS.md'))).toBe(false);
-      expect(fs.existsSync(path.join(tmpDir, 'TOOLS.md'))).toBe(false);
-      expect(fs.existsSync(path.join(tmpDir, 'AGENTS.md.bak'))).toBe(true);
-      expect(fs.existsSync(path.join(tmpDir, 'TOOLS.md.bak'))).toBe(true);
-      // .bak content is the old stale version
+      // Root paths are now symlinks resolving to the .ResearchClaw/ canonical copy
+      expect(fs.lstatSync(path.join(tmpDir, 'AGENTS.md')).isSymbolicLink()).toBe(true);
+      expect(fs.lstatSync(path.join(tmpDir, 'TOOLS.md')).isSymbolicLink()).toBe(true);
+      expect(fs.readFileSync(path.join(tmpDir, 'AGENTS.md'), 'utf-8')).toBe('new version');
+      expect(fs.readFileSync(path.join(tmpDir, 'TOOLS.md'), 'utf-8')).toBe('tools v2');
+      // The displaced stale originals are preserved as .bak, not destroyed
       expect(fs.readFileSync(path.join(tmpDir, 'AGENTS.md.bak'), 'utf-8')).toBe('old stale version');
+      expect(fs.readFileSync(path.join(tmpDir, 'TOOLS.md.bak'), 'utf-8')).toBe('old tools');
       // .ResearchClaw/ files untouched
       expect(fs.readFileSync(path.join(rcDir, 'AGENTS.md'), 'utf-8')).toBe('new version');
       expect(fs.readFileSync(path.join(rcDir, 'TOOLS.md'), 'utf-8')).toBe('tools v2');
     });
 
-    it('does not delete root files when .ResearchClaw/ copy is missing', async () => {
+    it('moves a root-only file into .ResearchClaw/ and leaves a root symlink (never deletes)', async () => {
       svc = new WorkspaceService(makeConfig(tmpDir));
       // Only root file, no .ResearchClaw/ copy — should migrate, not delete
       fs.writeFileSync(path.join(tmpDir, 'USER.md'), 'user data');
 
       await svc.init();
 
-      // File should have been moved to .ResearchClaw/, not deleted
+      // Canonical copy now lives in .ResearchClaw/; root path is a symlink to it
       const rcDir = path.join(tmpDir, '.ResearchClaw');
-      expect(fs.existsSync(path.join(tmpDir, 'USER.md'))).toBe(false);
       expect(fs.existsSync(path.join(rcDir, 'USER.md'))).toBe(true);
       expect(fs.readFileSync(path.join(rcDir, 'USER.md'), 'utf-8')).toBe('user data');
+      expect(fs.lstatSync(path.join(tmpDir, 'USER.md')).isSymbolicLink()).toBe(true);
+      expect(fs.readFileSync(path.join(tmpDir, 'USER.md'), 'utf-8')).toBe('user data');
     });
 
     it('is idempotent — multiple init() calls produce same result', async () => {
@@ -289,14 +291,15 @@ describe('WorkspaceService CRUD fixes', () => {
       fs.writeFileSync(path.join(tmpDir, 'SOUL.md'), 'stale soul');
 
       await svc.init();
-      expect(fs.existsSync(path.join(tmpDir, 'SOUL.md'))).toBe(false);
+      expect(fs.lstatSync(path.join(tmpDir, 'SOUL.md')).isSymbolicLink()).toBe(true);
       expect(fs.existsSync(path.join(tmpDir, 'SOUL.md.bak'))).toBe(true);
 
-      // Second init — should not crash, .bak stays, no double-rename
+      // Second init — should not crash, symlink + .bak stay, no double-rename
       svc.destroy();
       svc = new WorkspaceService(makeConfig(tmpDir));
       await svc.init();
-      expect(fs.existsSync(path.join(tmpDir, 'SOUL.md'))).toBe(false);
+      expect(fs.lstatSync(path.join(tmpDir, 'SOUL.md')).isSymbolicLink()).toBe(true);
+      expect(fs.readFileSync(path.join(tmpDir, 'SOUL.md'), 'utf-8')).toBe('soul content');
       expect(fs.existsSync(path.join(tmpDir, 'SOUL.md.bak'))).toBe(true);
       expect(fs.readFileSync(path.join(rcDir, 'SOUL.md'), 'utf-8')).toBe('soul content');
     });
