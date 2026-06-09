@@ -22,7 +22,7 @@ for candidate in python3 python; do
 done
 
 if [ -z "$PYTHON" ]; then
-  echo "ERROR: Python not found. Please install Python 3.9+ first."
+  echo "ERROR: Python not found. Please install Python 3.10+ first."
   exit 1
 fi
 

@@ -188,8 +188,14 @@ export class PptService {
     }
 
     const script = path.join(this.pptRoot, 'skills', 'ppt-master', 'scripts', 'svg_to_pptx.py');
-    const result = await this.runPython([script, projectAbsPath, '-s', stage], this.pptRoot, 300_000);
+    // ppt-master >= v2.9.0 defaults its output to exports/<name>_<ts>.pptx; pass an
+    // explicit -o so the produced file lands at a deterministic path we can pick up.
     const generatedPptx = path.join(projectAbsPath, 'presentation.pptx');
+    const result = await this.runPython(
+      [script, projectAbsPath, '-s', stage, '-o', generatedPptx],
+      this.pptRoot,
+      300_000,
+    );
     if (!fs.existsSync(generatedPptx)) {
       throw new Error(`Export output not found: ${generatedPptx}`);
     }
@@ -285,7 +291,63 @@ export class PptService {
     return { ok: true, oldPath: abs, newPath: targetPath };
   }
 
-  private runPython(args: string[], cwd: string, timeoutMs: number): Promise<PptRunResult> {
+  // Cached result of the python3 version probe (null = not yet checked).
+  private pythonOk: boolean | null = null;
+  private pythonVersion = '';
+
+  // ppt-master >= v2.9.0 uses PEP 604 (`X | None`) annotations evaluated at import
+  // time, so its scripts require Python 3.10+. The system `python3` may be older
+  // (macOS still ships 3.9). Probe once and fail fast with a clear message instead
+  // of letting users hit a cryptic `TypeError: unsupported operand type(s) for |`.
+  private checkPython(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (this.pythonOk === true) return resolve();
+      if (this.pythonOk === false) return reject(new Error(this.pythonVersionError()));
+
+      const probe = spawn('python3', ['--version'], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let out = '';
+      probe.stdout.on('data', (chunk) => (out += chunk.toString()));
+      probe.stderr.on('data', (chunk) => (out += chunk.toString()));
+      probe.on('error', (err) => {
+        this.pythonOk = false;
+        reject(
+          new Error(
+            `python3 not found on PATH. PPT Master needs Python 3.10+. (${err.message})`,
+          ),
+        );
+      });
+      probe.on('close', () => {
+        const m = out.match(/Python (\d+)\.(\d+)/);
+        if (!m) {
+          this.pythonOk = false;
+          return reject(
+            new Error('Could not determine python3 version; PPT Master needs Python 3.10+.'),
+          );
+        }
+        const major = Number(m[1]);
+        const minor = Number(m[2]);
+        this.pythonVersion = `${major}.${minor}`;
+        if (major > 3 || (major === 3 && minor >= 10)) {
+          this.pythonOk = true;
+          resolve();
+        } else {
+          this.pythonOk = false;
+          reject(new Error(this.pythonVersionError()));
+        }
+      });
+    });
+  }
+
+  private pythonVersionError(): string {
+    return (
+      `PPT Master 需要 Python 3.10+,当前检测到 Python ${this.pythonVersion || '未知'}。` +
+      `请升级 Python 后重试。/ PPT Master requires Python 3.10+, but found ` +
+      `${this.pythonVersion || 'unknown'}. Please install Python 3.10 or newer.`
+    );
+  }
+
+  private async runPython(args: string[], cwd: string, timeoutMs: number): Promise<PptRunResult> {
+    await this.checkPython();
     return new Promise((resolve, reject) => {
       const child = spawn('python3', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
       let stdout = '';
