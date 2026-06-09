@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { Image } from 'antd';
 import {
   CopyOutlined,
@@ -17,7 +16,12 @@ import { safeStringifyDetail } from '../../utils/activity-log';
 import { useGatewayStore } from '../../stores/gateway';
 import { sanitizeUserMessage } from '../../utils/sanitize-message';
 import { sanitizeAssistantMessage, sanitizeAssistantRawCopy } from '../../utils/sanitize-assistant-message';
-import CodeBlock from './CodeBlock';
+import {
+  MARKDOWN_REHYPE_PLUGINS,
+  MARKDOWN_REMARK_PLUGINS,
+  markdownComponents,
+  normalizeMath,
+} from '../../lib/markdown';
 
 interface ImageBlock {
   url: string;
@@ -192,40 +196,6 @@ interface MessageBubbleProps {
   isStreaming?: boolean;
 }
 
-const markdownCodeComponents = {
-  code: ({ className, children, ...props }: React.ComponentPropsWithoutRef<'code'> & { className?: string }) => {
-    const isInline = !className;
-    if (isInline) {
-      return (
-        <code
-          style={{
-            background: 'var(--surface-active)',
-            padding: '2px 4px',
-            borderRadius: 3,
-            fontFamily: "'Fira Code', 'JetBrains Mono', monospace",
-            fontSize: '0.9em',
-          }}
-          {...props}
-        >
-          {children}
-        </code>
-      );
-    }
-    return <CodeBlock className={className}>{children}</CodeBlock>;
-  },
-  pre: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
-  a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      style={{ color: 'var(--accent-secondary)' }}
-    >
-      {children}
-    </a>
-  ),
-};
-
 interface ActivityLogContentBlock {
   type: 'activity_log';
   title?: string;
@@ -376,8 +346,12 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
             <span className="chat-turn-label">{t('chat.system')}</span>
           </header>
           <div className="chat-turn-body markdown-body">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownCodeComponents}>
-              {text}
+            <ReactMarkdown
+              remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+              rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+              components={markdownComponents}
+            >
+              {normalizeMath(text)}
             </ReactMarkdown>
           </div>
         </div>
@@ -463,8 +437,12 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
           text ? <div>{text}</div> : null
         ) : (
           <div className="markdown-body">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownCodeComponents}>
-              {text}
+            <ReactMarkdown
+              remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+              rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+              components={markdownComponents}
+            >
+              {normalizeMath(text)}
             </ReactMarkdown>
           </div>
         )}

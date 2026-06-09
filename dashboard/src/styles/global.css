@@ -217,6 +217,19 @@ html, body {
   margin: 12px 0;
 }
 
+/* KaTeX math — inherit theme color, scroll wide display formulas */
+.markdown-body .katex {
+  color: inherit;
+  font-size: 1.05em;
+}
+
+.markdown-body .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  padding: 2px 0;
+}
+
 /* Compact variant — review brief / inline fields */
 .markdown-body-compact {
   font-size: 13px;
