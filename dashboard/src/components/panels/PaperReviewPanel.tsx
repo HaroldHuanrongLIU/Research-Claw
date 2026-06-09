@@ -211,7 +211,7 @@ function ReviewRecordBody({
               </Text>
               {brief.confidence ? <BriefMarkdown text={brief.confidence} /> : <Text>—</Text>}
             </div>
-            <div className="paper-review-brief-metric">
+            <div className="paper-review-brief-metric paper-review-brief-metric--verdict">
               <Text type="secondary" className="paper-review-brief-metric-label">
                 {t('paperReview.fields.verdict')}
               </Text>

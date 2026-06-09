@@ -282,6 +282,20 @@ html, body {
   min-width: 88px;
 }
 
+/* The verdict headline can be a full sentence — give it its own row and let the
+   tag wrap instead of overflowing the panel's right edge. */
+.paper-review-brief-metric--verdict {
+  flex-basis: 100%;
+  min-width: 0;
+}
+
+.paper-review-brief-metric--verdict .ant-tag {
+  max-width: 100%;
+  white-space: normal;
+  word-break: break-word;
+  margin-inline-end: 0;
+}
+
 .paper-review-brief-metric-label,
 .paper-review-brief-section-label {
   font-size: 12px;
