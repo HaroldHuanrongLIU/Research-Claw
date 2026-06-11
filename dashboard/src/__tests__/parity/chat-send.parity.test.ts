@@ -48,8 +48,8 @@ vi.mock('../../stores/gateway', () => ({
 }));
 
 // ─── Mock config store — vision capability for attachment tests ──
-// The unified image pipeline (chat.ts:268-337) checks primaryModelSupportsVision()
-// and hasImageModelConfigured() before sending attachments. Without this mock,
+// The unified image pipeline checks primaryModelSupportsVision()
+// and imageModelSupportsVision() before sending attachments. Without this mock,
 // send() returns early with an error and never calls chat.send.
 vi.mock('../../stores/config', async () => {
   const { parityConfigStoreMock } = await import('./parity-config-mock');

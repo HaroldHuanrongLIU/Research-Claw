@@ -101,12 +101,37 @@ export interface ChatMessage {
   toolName?: string;
   isError?: boolean;
   stopReason?: string;
+  /** Non-image workspace files referenced by this user turn (rendered as chips). */
+  references?: string[];
 }
 
 export interface ChatAttachment {
   id: string;
   dataUrl: string;
   mimeType: string;
+  /**
+   * When the image already exists in the workspace (dragged from the workspace
+   * panel, or ingested from an external drop), this is its workspace-relative
+   * path. The send pipeline reuses it instead of re-saving a duplicate copy.
+   */
+  wsPath?: string;
+}
+
+/**
+ * A file reference attached to a composer message. Always resolves to a
+ * workspace-relative path the sandboxed agent can read via workspace_read.
+ * External files are ingested into the workspace first (status 'uploading'),
+ * then referenced once ready.
+ */
+export interface ChatReference {
+  id: string;
+  path: string;
+  name: string;
+  source: 'workspace' | 'external';
+  status: 'ready' | 'uploading' | 'error';
+  size?: number;
+  mimeType?: string;
+  errorMsg?: string;
 }
 
 // --- Bootstrap Config ---

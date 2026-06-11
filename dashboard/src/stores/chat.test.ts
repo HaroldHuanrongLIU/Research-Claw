@@ -116,6 +116,44 @@ describe('Chat store', () => {
       expect(useChatStore.getState().lastError).toBeNull();
     });
 
+    // --- Regression: text / references combinations (D) ---
+    it('regression: plain text sends no reference block', async () => {
+      mockGatewayClient.request.mockResolvedValueOnce({});
+
+      await useChatStore.getState().send('just text');
+
+      const call = mockGatewayClient.request.mock.calls.find((c) => c[0] === 'chat.send');
+      expect(call?.[1].message).toBe('just text');
+      expect(call?.[1].message).not.toContain('引用文件');
+      expect(useChatStore.getState().messages[0].references).toBeUndefined();
+    });
+
+    it('regression: text + references appends a reference block', async () => {
+      mockGatewayClient.request.mockResolvedValueOnce({});
+
+      await useChatStore.getState().send('analyze this', undefined, {
+        references: ['sources/a.csv'],
+      });
+
+      const call = mockGatewayClient.request.mock.calls.find((c) => c[0] === 'chat.send');
+      expect(call?.[1].message).toContain('analyze this');
+      expect(call?.[1].message).toContain('- @sources/a.csv');
+      expect(useChatStore.getState().messages[0].references).toEqual(['sources/a.csv']);
+    });
+
+    it('regression: references-only send is NOT dropped (H1)', async () => {
+      mockGatewayClient.request.mockResolvedValueOnce({});
+
+      await useChatStore.getState().send('', undefined, {
+        references: ['sources/a.csv'],
+      });
+
+      const call = mockGatewayClient.request.mock.calls.find((c) => c[0] === 'chat.send');
+      expect(call).toBeDefined();
+      expect(call?.[1].message).toContain('- @sources/a.csv');
+      expect(useChatStore.getState().messages[0].references).toEqual(['sources/a.csv']);
+    });
+
     it('does not re-enter staged writing after a completed job in the same session', async () => {
       const stages = buildInitialStageStates('outputs/drafts/session28').map((stage) => ({
         ...stage,
@@ -369,6 +407,91 @@ describe('Chat store', () => {
         expect(useChatStore.getState().streaming).toBe(false);
         expect(useChatStore.getState().messages).toHaveLength(0);
       });
+
+      it('offers continue (canContinue + lastError) on a timeout/system abort', () => {
+        // No _userAbortedRunId set → this is a gateway timeout, not a user stop.
+        useChatStore.setState({
+          runId: 'run-1',
+          streaming: true,
+          streamText: 'partial',
+          messages: [],
+          _userAbortedRunId: null,
+          canContinue: false,
+          lastError: null,
+        });
+
+        useChatStore.getState().handleChatEvent({
+          runId: 'run-1',
+          sessionKey: 'main',
+          state: 'aborted',
+        });
+
+        const state = useChatStore.getState();
+        expect(state.canContinue).toBe(true);
+        expect(state.lastError).toMatch(/继续|时间上限|continue|time limit/i);
+        expect(state._userAbortedRunId).toBeNull();
+      });
+
+      it('stays silent (no continue) on a user-initiated abort', () => {
+        // abort() tagged this runId → user clicked stop, do not offer continue.
+        useChatStore.setState({
+          runId: 'run-1',
+          streaming: true,
+          streamText: 'partial',
+          messages: [],
+          _userAbortedRunId: 'run-1',
+          canContinue: false,
+          lastError: null,
+        });
+
+        useChatStore.getState().handleChatEvent({
+          runId: 'run-1',
+          sessionKey: 'main',
+          state: 'aborted',
+        });
+
+        const state = useChatStore.getState();
+        expect(state.canContinue).toBe(false);
+        expect(state.lastError).toBeNull();
+        expect(state._userAbortedRunId).toBeNull();
+      });
+    });
+
+    describe('continueRun', () => {
+      it('sends a continuation instruction and clears canContinue', async () => {
+        mockGatewayClient.request.mockResolvedValue({});
+        useChatStore.setState({
+          canContinue: true,
+          lastError: 'timed out',
+          streaming: false,
+          sending: false,
+          runId: null,
+        });
+
+        useChatStore.getState().continueRun();
+        await Promise.resolve();
+
+        expect(useChatStore.getState().canContinue).toBe(false);
+        expect(mockGatewayClient.request).toHaveBeenCalledWith('chat.send',
+          expect.objectContaining({ sessionKey: 'main' }),
+        );
+      });
+
+      it('is a no-op when a run is already active', () => {
+        useChatStore.setState({ canContinue: true, streaming: true });
+
+        useChatStore.getState().continueRun();
+
+        expect(mockGatewayClient.request).not.toHaveBeenCalled();
+      });
+
+      it('is a no-op when no continue is offered', () => {
+        useChatStore.setState({ canContinue: false, streaming: false, sending: false });
+
+        useChatStore.getState().continueRun();
+
+        expect(mockGatewayClient.request).not.toHaveBeenCalled();
+      });
     });
 
     describe('error', () => {
@@ -559,6 +682,12 @@ describe('Chat store', () => {
       useChatStore.setState({ lastError: 'some error' });
       useChatStore.getState().clearError();
       expect(useChatStore.getState().lastError).toBeNull();
+    });
+
+    it('also dismisses the continue affordance', () => {
+      useChatStore.setState({ lastError: 'timed out', canContinue: true });
+      useChatStore.getState().clearError();
+      expect(useChatStore.getState().canContinue).toBe(false);
     });
   });
 

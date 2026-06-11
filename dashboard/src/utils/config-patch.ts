@@ -31,10 +31,17 @@ export interface ConfigPatchInput {
   /** Omit or empty → preserve existing key via sentinel round-trip */
   apiKey?: string;
   textModel: string;
+  /** Informational only — the builder derives vision intent from `visionModel` (tri-state). */
   visionEnabled?: boolean;
   /** Native provider key for vision (may equal text provider) */
   visionProvider?: string;
-  visionModel?: string;
+  /**
+   * Vision model intent (tri-state):
+   *   non-empty string → set this model as the independent vision model
+   *   null / ''        → explicitly disable vision (imageModel mirrors the text model)
+   *   undefined        → caller is not touching vision → preserve existing imageModel
+   */
+  visionModel?: string | null;
   /** When vision uses a different provider, its baseUrl */
   visionBaseUrl?: string;
   visionApiKey?: string;
@@ -180,6 +187,48 @@ function resolveModelDef(
     contextWindow: known?.contextWindow ?? 32_000,
     maxTokens: known?.maxTokens ?? 16_384,
   };
+}
+
+/**
+ * "preserve" mode (caller did not touch vision): keep the previously configured
+ * imageModel.primary IFF it still resolves to a vision-capable model. The model's
+ * true input modalities are read from the ORIGINAL config (pre-rebuild). When a
+ * same-provider text/vision rebuild would have dropped the vision model from its
+ * provider entry, re-add it so the ref is not orphaned. Returns null when there is
+ * no vision-capable prior imageModel (caller then falls back to the text model).
+ */
+function preserveVisionImageRef(
+  base: Record<string, unknown>,
+  providers: Record<string, Record<string, unknown>>,
+): string | null {
+  const defaults = (base.agents as Record<string, unknown> | undefined)?.defaults as
+    | Record<string, unknown>
+    | undefined;
+  const prior = (defaults?.imageModel as { primary?: string } | undefined)?.primary;
+  if (!prior || !prior.includes('/')) return null;
+
+  const slash = prior.indexOf('/');
+  const providerKey = prior.slice(0, slash);
+  const modelId = prior.slice(slash + 1);
+
+  const baseProviders = (base.models as Record<string, unknown> | undefined)?.providers as
+    | Record<string, Record<string, unknown>>
+    | undefined;
+  const baseModels = baseProviders?.[providerKey]?.models as
+    | Array<Record<string, unknown>>
+    | undefined;
+  const baseDef = baseModels?.find((m) => m.id === modelId);
+  const baseInput = baseDef?.input as string[] | undefined;
+  if (!Array.isArray(baseInput) || !baseInput.includes('image')) return null;
+
+  const target = providers[providerKey];
+  if (!target) return null; // provider gone → don't keep an orphan ref
+
+  const targetModels = (target.models as Array<Record<string, unknown>> | undefined) ?? [];
+  if (!targetModels.some((m) => m.id === modelId)) {
+    target.models = [...targetModels, structuredClone(baseDef)];
+  }
+  return prior;
 }
 
 /**
@@ -621,7 +670,15 @@ export function buildSaveConfig(
   const baseUrl = cleanUrl(input.baseUrl);
   const apiType = normalizeApiType(input.api);
 
-  const hasVision = !!input.visionEnabled && !!input.visionModel;
+  // Vision intent is driven solely by the tri-state input.visionModel:
+  //   non-empty string → set; null/'' → clear (mirror text); undefined → preserve existing imageModel.
+  const visionIntent: 'set' | 'clear' | 'preserve' =
+    typeof input.visionModel === 'string'
+      ? (input.visionModel.trim() ? 'set' : 'clear')
+      : input.visionModel === null
+        ? 'clear'
+        : 'preserve';
+  const hasVision = visionIntent === 'set';
   const visionProviderKey = input.visionProvider || providerKey;
   const useSeparateProvider = hasVision && visionProviderKey !== providerKey;
 
@@ -790,9 +847,13 @@ export function buildSaveConfig(
   }
 
   // --- Agent model refs ---
-  const visionRef = hasVision
-    ? `${visionProviderKey}/${input.visionModel}`
-    : `${providerKey}/${input.textModel}`;
+  const textRef = `${providerKey}/${input.textModel}`;
+  const visionRef =
+    visionIntent === 'set'
+      ? `${visionProviderKey}/${input.visionModel}`
+      : visionIntent === 'preserve'
+        ? (preserveVisionImageRef(base, providers) ?? textRef)
+        : textRef;
 
   // Preserve existing agent defaults (heartbeat, models aliases, etc.)
   const existingAgents = base.agents as Record<string, unknown> | undefined;

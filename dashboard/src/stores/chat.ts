@@ -9,8 +9,9 @@ import { useSessionsStore } from './sessions';
 import { useCronStore } from './cron';
 import { useMonitorStore } from './monitor';
 import { useUiStore } from './ui';
-import { primaryModelSupportsVision, hasImageModelConfigured, useConfigStore } from './config';
+import { primaryModelSupportsVision, imageModelSupportsVision, useConfigStore } from './config';
 import { syncSystemPromptAppendToGateway } from '../utils/sync-system-prompt-append';
+import { appendReferenceBlock, dedupePaths, isImagePath } from '../utils/file-reference';
 import i18n from '../i18n';
 import { sanitizeUserMessage, CRON_REMINDER_RE } from '../utils/sanitize-message';
 import { sanitizeAssistantMessage } from '../utils/sanitize-assistant-message';
@@ -535,10 +536,18 @@ interface ChatState {
   runId: string | null;
   sessionKey: string;
   lastError: string | null;
+  /** True after a non-user abort (gateway timeout / system stop) — gates the
+   *  "continue" affordance (inline button + top banner). Cleared on the next
+   *  send/continue or when the error is dismissed. */
+  canContinue: boolean;
   tokensIn: number;
   tokensOut: number;
   /** Set when a seq gap is detected during streaming — cleared after deferred reload. */
   _pendingGapReload: boolean;
+  /** Set to the active runId when the USER clicks stop. Lets the 'aborted' handler
+   *  tell a user-initiated abort (silent) apart from a timeout/system abort (offer
+   *  continue). Consumed and reset to null when the matching 'aborted' arrives. */
+  _userAbortedRunId: string | null;
   /**
    * Optimistic user messages added to messages[] before the gateway persists them
    * to the session transcript. When the gateway queues messages behind an active
@@ -571,7 +580,7 @@ interface ChatState {
   /** Bumped on each restore so MessageInput re-applies even if text is unchanged. */
   inputRestoreSeq: number;
 
-  send: (text: string, attachments?: ChatAttachment[], options?: { displayText?: string }) => Promise<void>;
+  send: (text: string, attachments?: ChatAttachment[], options?: { displayText?: string; references?: string[] }) => Promise<void>;
   /** Append a message that never goes to gateway — kept across loadHistory(). */
   appendLocalMessage: (message: ChatMessage) => void;
   abort: () => void;
@@ -587,6 +596,9 @@ interface ChatState {
   onGapDetected: () => void;
   setSessionKey: (key: string) => void;
   clearError: () => void;
+  /** Resume after a timeout/system abort — sends a continuation instruction and
+   *  clears canContinue. No-op if a run is already active. */
+  continueRun: () => void;
   updateTokens: (input: number, output: number) => void;
 }
 
@@ -605,9 +617,11 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   runId: null,
   sessionKey: 'main',
   lastError: null,
+  canContinue: false,
   tokensIn: 0,
   tokensOut: 0,
   _pendingGapReload: false,
+  _userAbortedRunId: null,
   _pendingUserMsgs: _restoredPendingMsgs,
   _localOnlyMsgs: _restoredLocalMsgs,
   _streamStartedAt: null, _lastDeltaAt: null, _reconnectedAt: null,
@@ -636,7 +650,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     }
   },
 
-  send: async (text: string, attachments?: ChatAttachment[], options?: { displayText?: string }) => {
+  send: async (text: string, attachments?: ChatAttachment[], options?: { displayText?: string; references?: string[] }) => {
     const client = useGatewayStore.getState().client;
     if (!client || !client.isConnected) {
       set({ lastError: i18n.t('chat.notConnected') });
@@ -649,7 +663,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     //   if (!msg && !hasAttachments) { return null; }
     const trimmed = text.trim();
     const hasAttachments = attachments !== undefined && attachments.length > 0;
-    if (!trimmed && !hasAttachments) {
+    const hasReferences = (options?.references?.length ?? 0) > 0;
+    if (!trimmed && !hasAttachments && !hasReferences) {
       return;
     }
 
@@ -825,6 +840,12 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     // Source: openclaw/ui/src/ui/controllers/chat.ts:192-196
     const localRunId = crypto.randomUUID();
 
+    // Non-image references render as chips in the user bubble (images already
+    // show as thumbnails). Persisted on the optimistic message; reconstructed
+    // from the injected reference block after a history reload (MessageBubble).
+    const refPaths = dedupePaths(options?.references ?? []);
+    const fileRefPaths = refPaths.filter((p) => !isImagePath(p));
+
     // Build user message — include content blocks for display when attachments present
     const userMessage: ChatMessage = {
       role: 'user',
@@ -838,6 +859,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             })),
           ]
         : undefined,
+      references: fileRefPaths.length > 0 ? fileRefPaths : undefined,
       timestamp: Date.now(),
       idempotencyKey: `${localRunId}:user`,
     };
@@ -846,6 +868,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       messages: [...s.messages, userMessage],
       sending: true,
       lastError: null,
+      canContinue: false,
+      _userAbortedRunId: null,
       streamText: null,
       runId: localRunId,
       _pendingUserMsgs: [...s._pendingUserMsgs, userMessage],
@@ -873,6 +897,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           mimeType: att.mimeType,
           fileName: `image-${idx + 1}.${ext}`,
           content,
+          // Already-in-workspace images (workspace drag / external ingest) carry
+          // their path so we skip re-saving a duplicate copy.
+          wsPath: att.wsPath,
         };
       });
 
@@ -897,10 +924,12 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       let finalAttachments = rpcAttachments;
       const visionCapable = primaryModelSupportsVision();
 
-      // Scenario 3 guard: text-only primary, no imageModel configured.
-      // The gateway would silently drop attachments AND there's no /image tool
-      // fallback. Block the send with a clear error instead of a cryptic 400.
-      if (rpcAttachments?.length && !visionCapable && !hasImageModelConfigured()) {
+      // Scenario 3 guard: text-only primary AND no vision-capable imageModel.
+      // The gateway would silently drop attachments AND the /image tool would
+      // fail late with "Model does not support images". Block the send with a
+      // clear error instead. Capability is checked (not mere existence) so a
+      // text-only model mistakenly set as imageModel is correctly caught here.
+      if (rpcAttachments?.length && !visionCapable && !imageModelSupportsVision()) {
         set((s) => ({
           ...clearActiveRunState(),
           ...(buildAbortInputRestorePatch(s, localRunId) ?? { _pendingUserMsgs: [] }),
@@ -914,6 +943,12 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       if (rpcAttachments?.length) {
         const savedPaths: string[] = [];
         for (const att of rpcAttachments) {
+          // Reuse the existing workspace path when the image is already there
+          // (dragged from the workspace / ingested from an external drop).
+          if (att.wsPath) {
+            savedPaths.push(att.wsPath);
+            continue;
+          }
           const ts = Date.now();
           const safeName = att.fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
           const wsPath = `sources/${ts}-${safeName}`;
@@ -948,6 +983,13 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             console.log('[Chat] Vision primary — images sent inline + saved to workspace');
           }
         }
+      }
+
+      // Inject file references (workspace drag / `@` mention / external ingest)
+      // as a structured block so the sandboxed agent gets workspace-relative
+      // paths it can read via workspace_read — no prompt-body pollution.
+      if (fileRefPaths.length > 0) {
+        finalMessage = appendReferenceBlock(finalMessage, fileRefPaths);
       }
 
       void syncSystemPromptAppendToGateway(useConfigStore.getState().systemPromptAppend);
@@ -1017,9 +1059,13 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     }
 
     // Keep streamText until gateway 'aborted' (or timeout) so partial reply can be saved.
+    // Tag this runId as user-aborted so the 'aborted' handler stays silent for it
+    // (vs a gateway timeout, which should offer "continue").
     set((s) => ({
       streaming: false,
       compacting: false,
+      _userAbortedRunId: runId,
+      canContinue: false,
       ...(optimisticRestore ?? {}),
     }));
 
@@ -1449,6 +1495,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         // Uses the same triple-AND pattern as the delta handler (line 575).
         if (event.runId && runId && event.runId !== runId) return;
 
+        // Distinguish a USER-initiated stop (abort() tagged _userAbortedRunId) from a
+        // gateway timeout / system abort (same 'aborted' event, no tag). Only the latter
+        // surfaces an error + "continue" affordance; user stops stay silent.
+        const wasUserAbort = get()._userAbortedRunId !== null && get()._userAbortedRunId === runId;
+        const abortPatch = wasUserAbort
+          ? { _userAbortedRunId: null }
+          : { _userAbortedRunId: null, lastError: i18n.t('chat.runTimedOut'), canContinue: true };
+
         // Match restore to client runId (idempotencyKey), not gateway event.runId.
         const partialText = get().streamText;
         if (partialText) {
@@ -1469,6 +1523,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
               _lastDeltaAt: null,
               _reconnectedAt: null,
               ...(restore ?? { _pendingUserMsgs: [] }),
+              ...abortPatch,
             };
           });
         } else {
@@ -1483,7 +1538,18 @@ export const useChatStore = create<ChatState>()((set, get) => ({
               _lastDeltaAt: null,
               _reconnectedAt: null,
               ...(restore ?? { _pendingUserMsgs: [] }),
+              ...abortPatch,
             };
+          });
+        }
+        // Top-banner notification for timeout/system aborts (user stops stay silent).
+        if (!wasUserAbort) {
+          useUiStore.getState().addNotification({
+            type: 'error',
+            title: i18n.t('chat.runIssueNotificationTitle'),
+            body: i18n.t('chat.runTimedOut'),
+            dedupKey: `chat-run-timeout:${get().sessionKey}:${runId ?? 'unknown'}`,
+            targetSessionKey: get().sessionKey,
           });
         }
         // Deferred gap recovery
@@ -1560,7 +1626,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   },
 
   clearError: () => {
-    set({ lastError: null });
+    set({ lastError: null, canContinue: false });
+  },
+
+  continueRun: () => {
+    // Guard: only resume when idle (no active run) and a continue is actually offered.
+    if (get().streaming || get().sending || !get().canContinue) return;
+    set({ canContinue: false, lastError: null });
+    void get().send(i18n.t('chat.continueInstruction'));
   },
 
   updateTokens: (input: number, output: number) => {

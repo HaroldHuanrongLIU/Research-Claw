@@ -1,23 +1,47 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Button, Tooltip, message, Modal } from 'antd';
+import { Button, Tooltip, message, Modal, Image } from 'antd';
 import { SendOutlined, PaperClipOutlined, ReloadOutlined, HistoryOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useChatStore } from '../../stores/chat';
 import { useGatewayStore } from '../../stores/gateway';
 import { useToolStreamStore } from '../../stores/tool-stream';
-import type { ChatAttachment } from '../../gateway/types';
+import { useConfigStore, primaryModelSupportsVision, imageModelSupportsVision } from '../../stores/config';
+import type { ChatAttachment, ChatReference } from '../../gateway/types';
 import SlashCommandMenu, { useSlashCommandMenu } from './SlashCommandMenu';
+import ReferenceMenu, { useReferenceMenu } from './ReferenceMenu';
 import InputHistoryPopup from './InputHistoryPopup';
 import { useInputHistory } from '../../hooks/useInputHistory';
 import { abortChatShortcutLabel } from '../../utils/keyboard-shortcut';
 import { useUiStore } from '../../stores/ui';
 import { useSessionsStore } from '../../stores/sessions';
 import { resizeComposerInput } from '../../utils/composer-input';
+import { uploadFileToWorkspace } from '../../gateway/upload';
+import {
+  MAX_REFERENCE_SIZE,
+  basenameOf,
+  isImagePath,
+  safeUploadName,
+  timestampedUploadName,
+} from '../../utils/file-reference';
+import {
+  collectDroppedEntries,
+  mapWithConcurrency,
+  splitRelPath,
+  MAX_DROP_FILES,
+  MAX_DROP_TOTAL_BYTES,
+  UPLOAD_CONCURRENCY,
+  type CollectedDrop,
+  type DroppedFile,
+} from '../../utils/drop-entries';
+import { flattenWorkspaceFiles } from '../../utils/mention';
+import { FileOutlined, FolderOutlined, PictureOutlined, LoadingOutlined, CloseOutlined } from '@ant-design/icons';
 
 const DRAFT_STORAGE_PREFIX = 'rc-chat-draft:';
 
 const MAX_SIZE = 5_000_000; // 5MB — must match gateway's parseMessageWithAttachments limit
 const ACCEPTED_TYPES = /^image\/(png|jpe?g|gif|webp|bmp|tiff|heic|heif)$/;
+
+const WORKSPACE_PATH_MIME = 'text/x-workspace-path';
 
 export default function MessageInput() {
   const { t } = useTranslation();
@@ -28,6 +52,10 @@ export default function MessageInput() {
     } catch { return ''; }
   });
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [references, setReferences] = useState<ChatReference[]>([]);
+  const [caret, setCaret] = useState(0);
+  const [wsFilePaths, setWsFilePaths] = useState<string[]>([]);
+  const wsPathsLoadedRef = useRef(false);
   const [isDragging, setIsDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -38,6 +66,7 @@ export default function MessageInput() {
   const inputRestoreSeq = useChatStore((s) => s.inputRestoreSeq);
   const clearInputRestore = useChatStore((s) => s.clearInputRestore);
   const sending = useChatStore((s) => s.sending);
+  const client = useGatewayStore((s) => s.client);
   const runId = useChatStore((s) => s.runId);
   const streaming = useChatStore((s) => s.streaming);
   const canStopGeneration = Boolean(runId) || sending || streaming;
@@ -55,7 +84,18 @@ export default function MessageInput() {
   const composingRef = useRef(false);
 
   const isConnected = connState === 'connected';
-  const canSend = (text.trim().length > 0 || attachments.length > 0) && isConnected && !sending;
+  const hasReadyReference = references.some((r) => r.status === 'ready');
+
+  // Re-evaluate vision capability when the model/provider config changes so the
+  // attach-time hint appears/disappears as the user switches models.
+  const gatewayConfig = useConfigStore((s) => s.gatewayConfig);
+  const attachNoVisionModel =
+    attachments.length > 0
+    && Boolean(gatewayConfig)
+    && !primaryModelSupportsVision()
+    && !imageModelSupportsVision();
+  const canSend =
+    (text.trim().length > 0 || attachments.length > 0 || hasReadyReference) && isConnected && !sending;
 
   // Persist draft to localStorage (session-isolated)
   useEffect(() => {
@@ -154,38 +194,288 @@ export default function MessageInput() {
     }
   });
 
-  const processFiles = useCallback(
-    (files: FileList | File[]) => {
-      for (const file of Array.from(files)) {
-        if (!ACCEPTED_TYPES.test(file.type)) {
-          message.warning(t('chat.imageOnly'));
-          continue;
+  // Images carry BOTH a preview thumbnail (attachment) and a chip (reference),
+  // linked by attachment.wsPath === reference.path. Removing either drops both.
+  const removeAttachment = useCallback((id: string) => {
+    const target = attachments.find((a) => a.id === id);
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+    if (target?.wsPath) {
+      setReferences((prev) => prev.filter((r) => r.path !== target.wsPath));
+    }
+  }, [attachments]);
+
+  const removeReference = useCallback((id: string) => {
+    const target = references.find((r) => r.id === id);
+    setReferences((prev) => prev.filter((r) => r.id !== id));
+    if (target) {
+      setAttachments((prev) => prev.filter((a) => a.wsPath !== target.path));
+    }
+  }, [references]);
+
+  /** Add a known-path reference (workspace drag or `@` mention). Dedupes by path. */
+  const addReference = useCallback(
+    (ref: Omit<ChatReference, 'id'>): string | null => {
+      if (references.some((r) => r.path === ref.path)) return null;
+      const id = crypto.randomUUID();
+      setReferences((prev) =>
+        prev.some((r) => r.path === ref.path) ? prev : [...prev, { ...ref, id }],
+      );
+      return id;
+    },
+    [references],
+  );
+
+  /** Reference a workspace file by relative path; for images, also fetch bytes
+   *  for an inline vision thumbnail (thumbnail + reference run in parallel). */
+  const addWorkspaceReference = useCallback(
+    async (path: string) => {
+      const id = addReference({ path, name: basenameOf(path), source: 'workspace', status: 'ready' });
+      if (id && isImagePath(path) && client) {
+        try {
+          const result = await client.request<{ content: string; encoding: string; mime_type?: string }>(
+            'rc.ws.read',
+            { path },
+          );
+          if (result?.encoding === 'base64') {
+            const mime = result.mime_type || 'image/png';
+            setAttachments((prev) =>
+              prev.some((a) => a.wsPath === path)
+                ? prev
+                : [...prev, { id: crypto.randomUUID(), dataUrl: `data:${mime};base64,${result.content}`, mimeType: mime, wsPath: path }],
+            );
+          }
+        } catch {
+          // Image unreadable (deleted/binary) — keep the reference chip only.
         }
-        if (file.size > MAX_SIZE) {
-          message.warning(t('chat.imageTooLarge'));
-          continue;
+      }
+    },
+    [addReference, client],
+  );
+
+  /** Ingest an external (host) file into the workspace, tracking its upload
+   *  state as a chip. Always uses a timestamped name to avoid collisions. */
+  const ingestExternalFile = useCallback(
+    async (file: File, destination: 'uploads' | 'sources') => {
+      if (file.size > MAX_REFERENCE_SIZE) {
+        message.warning(
+          t('chat.refTooLarge', {
+            name: file.name,
+            limit: Math.round(MAX_REFERENCE_SIZE / (1024 * 1024)),
+            defaultValue: '"{{name}}" exceeds the {{limit}}MB limit and was not ingested',
+          }),
+        );
+        return;
+      }
+      const id = crypto.randomUUID();
+      const uploadName = timestampedUploadName(file.name, Date.now());
+      const provisionalPath = `${destination}/${uploadName}`;
+      setReferences((prev) => [
+        ...prev,
+        {
+          id,
+          path: provisionalPath,
+          name: file.name,
+          source: 'external',
+          status: 'uploading',
+          size: file.size,
+          mimeType: file.type,
+        },
+      ]);
+      try {
+        const result = await uploadFileToWorkspace(file, destination, uploadName);
+        setReferences((prev) =>
+          prev.map((r) =>
+            r.id === id
+              ? { ...r, path: result.path, status: 'ready', size: result.size, mimeType: result.mime_type }
+              : r,
+          ),
+        );
+        // A new file now exists in the workspace — invalidate the cached `@`-mention
+        // file list so the next mention re-fetches and can suggest it.
+        wsPathsLoadedRef.current = false;
+        // For images small enough for inline vision, also attach a thumbnail
+        // bound to the just-ingested workspace path (no duplicate re-save on send).
+        if (ACCEPTED_TYPES.test(file.type) && file.size <= MAX_SIZE) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result as string;
+            setAttachments((prev) =>
+              prev.some((a) => a.wsPath === result.path)
+                ? prev
+                : [...prev, { id: crypto.randomUUID(), dataUrl, mimeType: file.type, wsPath: result.path }],
+            );
+          };
+          reader.readAsDataURL(file);
         }
-        const reader = new FileReader();
-        reader.onload = () => {
-          const dataUrl = reader.result as string;
-          setAttachments((prev) => [
-            ...prev,
-            {
-              id: crypto.randomUUID(),
-              dataUrl,
-              mimeType: file.type,
-            },
-          ]);
-        };
-        reader.readAsDataURL(file);
+      } catch (err) {
+        setReferences((prev) =>
+          prev.map((r) =>
+            r.id === id
+              ? { ...r, status: 'error', errorMsg: err instanceof Error ? err.message : String(err) }
+              : r,
+          ),
+        );
       }
     },
     [t],
   );
 
-  const removeAttachment = useCallback((id: string) => {
-    setAttachments((prev) => prev.filter((a) => a.id !== id));
-  }, []);
+  /** Ingest a whole dropped folder as a SINGLE folder chip, preserving the
+   *  internal directory structure under a timestamped root in uploads/. */
+  const ingestFolder = useCallback(
+    async (rootName: string, group: DroppedFile[]) => {
+      const safeRoot = `${Date.now()}-${safeUploadName(rootName)}`;
+      const rootPath = `uploads/${safeRoot}/`;
+      const chipId = crypto.randomUUID();
+      const totalSize = group.reduce((sum, d) => sum + d.file.size, 0);
+      setReferences((prev) => [
+        ...prev,
+        { id: chipId, path: rootPath, name: `${rootName}/`, source: 'external', status: 'uploading', size: totalSize },
+      ]);
+
+      let failCount = 0;
+      await mapWithConcurrency(group, UPLOAD_CONCURRENCY, async (d) => {
+        // Sanitize directory segments (path safety) but keep the original
+        // filename — the gateway strips slashes/control chars while preserving
+        // non-ASCII (CJK) names, so folder contents stay human-readable.
+        const { subDir, fileName } = splitRelPath(d.relPath, d.rootDir, safeUploadName);
+        const destDir = subDir ? `uploads/${safeRoot}/${subDir}` : `uploads/${safeRoot}`;
+        try {
+          await uploadFileToWorkspace(d.file, destDir, fileName);
+        } catch (err) {
+          failCount++;
+          console.error('[MessageInput] folder upload failed:', d.relPath, err);
+        }
+      });
+
+      // New files now exist — invalidate the cached `@`-mention list.
+      wsPathsLoadedRef.current = false;
+      if (failCount === group.length) {
+        setReferences((prev) =>
+          prev.map((r) =>
+            r.id === chipId
+              ? { ...r, status: 'error', errorMsg: t('chat.dropFolderAllFailed', { defaultValue: 'All files in this folder failed to upload' }) }
+              : r,
+          ),
+        );
+      } else {
+        setReferences((prev) => prev.map((r) => (r.id === chipId ? { ...r, status: 'ready' } : r)));
+        if (failCount > 0) {
+          message.warning(
+            t('chat.dropFolderPartial', {
+              failed: failCount,
+              total: group.length,
+              defaultValue: '{{failed}}/{{total}} files in the folder failed to upload',
+            }),
+          );
+        }
+      }
+    },
+    [t],
+  );
+
+  /** Apply the shared drop policy (skip >100MB files, confirm bulk drops) and
+   *  fan out: loose files → individual chips, folders → one folder chip each. */
+  const ingestDroppedEntries = useCallback(
+    async (collected: CollectedDrop) => {
+      const all = collected.files;
+      if (all.length === 0) return;
+
+      // Skip oversized single files (memory-protection cap) — one combined warning.
+      const oversized = all.filter((d) => d.file.size > MAX_REFERENCE_SIZE);
+      const kept = all.filter((d) => d.file.size <= MAX_REFERENCE_SIZE);
+      if (oversized.length > 0) {
+        message.warning(
+          t('chat.dropSkippedLarge', {
+            count: oversized.length,
+            limit: Math.round(MAX_REFERENCE_SIZE / (1024 * 1024)),
+            defaultValue: '{{count}} file(s) over {{limit}}MB were skipped',
+          }),
+        );
+      }
+      if (kept.length === 0) return;
+
+      // Confirm large batches before uploading everything.
+      const totalBytes = kept.reduce((sum, d) => sum + d.file.size, 0);
+      if (kept.length > MAX_DROP_FILES || totalBytes > MAX_DROP_TOTAL_BYTES) {
+        const ok = await new Promise<boolean>((resolve) => {
+          Modal.confirm({
+            title: t('chat.dropBulkTitle', { defaultValue: 'Upload many files?' }),
+            content: t('chat.dropBulkContent', {
+              count: kept.length,
+              size: Math.round(totalBytes / (1024 * 1024)),
+              defaultValue: 'This drop contains {{count}} files (~{{size}}MB). Upload all of them?',
+            }),
+            okText: t('chat.dropBulkConfirm', { defaultValue: 'Upload all' }),
+            onOk: () => resolve(true),
+            onCancel: () => resolve(false),
+          });
+        });
+        if (!ok) return;
+      }
+
+      // Loose files keep the existing per-file behavior (images → vision thumbnail).
+      const looseFiles = kept.filter((d) => d.rootDir === null);
+      for (const d of looseFiles) {
+        const dest = isImagePath(d.file.name) || ACCEPTED_TYPES.test(d.file.type) ? 'sources' : 'uploads';
+        void ingestExternalFile(d.file, dest);
+      }
+
+      // Folder files are grouped by their top-level directory → one chip each.
+      const folderGroups = new Map<string, DroppedFile[]>();
+      for (const d of kept) {
+        if (d.rootDir === null) continue;
+        const list = folderGroups.get(d.rootDir);
+        if (list) list.push(d);
+        else folderGroups.set(d.rootDir, [d]);
+      }
+      for (const [rootName, group] of folderGroups) {
+        void ingestFolder(rootName, group);
+      }
+    },
+    [t, ingestExternalFile, ingestFolder],
+  );
+
+  const retryReference = useCallback(
+    (id: string) => {
+      // Errored chips carry no File handle; the simplest robust recovery is to
+      // drop the chip and ask the user to re-drop. Keep UX honest about that.
+      removeReference(id);
+    },
+    [removeReference],
+  );
+
+  // Lazily load the workspace file list for the `@` mention menu.
+  const ensureWsPaths = useCallback(async () => {
+    if (wsPathsLoadedRef.current || !client) return;
+    wsPathsLoadedRef.current = true;
+    try {
+      const res = await client.request<{ tree: unknown[] }>('rc.ws.tree', { depth: 5, includeHidden: false });
+      setWsFilePaths(flattenWorkspaceFiles((res.tree as never) ?? []));
+    } catch {
+      wsPathsLoadedRef.current = false;
+    }
+  }, [client]);
+
+  // `@`-mention reference menu (workspace files)
+  const refMenu = useReferenceMenu(text, caret, wsFilePaths, (path, strippedText, newCaret) => {
+    setText(strippedText);
+    void addWorkspaceReference(path);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.selectionStart = el.selectionEnd = newCaret;
+      setCaret(newCaret);
+      el.style.height = 'auto';
+      resizeComposerInput(el);
+    });
+  });
+
+  // Load workspace file list the moment an `@` mention becomes active.
+  useEffect(() => {
+    if (refMenu.visible) void ensureWsPaths();
+  }, [refMenu.visible, ensureWsPaths]);
 
   const handlePaste = useCallback(
     (e: React.ClipboardEvent) => {
@@ -202,10 +492,12 @@ export default function MessageInput() {
 
       if (imageFiles.length > 0) {
         e.preventDefault();
-        processFiles(imageFiles);
+        // Ingest into the workspace so pasted images get a chip + thumbnail,
+        // matching the external-drop flow (consistency with R3).
+        for (const file of imageFiles) void ingestExternalFile(file, 'sources');
       }
     },
-    [processFiles],
+    [ingestExternalFile],
   );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -226,16 +518,30 @@ export default function MessageInput() {
       e.stopPropagation();
       setIsDragging(false);
 
-      if (e.dataTransfer.files.length > 0) {
-        processFiles(e.dataTransfer.files);
+      // 1) Workspace drag (file tree → composer): zero-copy reference by path.
+      if (e.dataTransfer.types.includes(WORKSPACE_PATH_MIME)) {
+        const path = e.dataTransfer.getData(WORKSPACE_PATH_MIME);
+        if (path) void addWorkspaceReference(path);
+        return;
       }
+
+      // 2) External file/folder drop (host filesystem → composer). collectDroppedEntries
+      //    expands any dropped directories; it captures entries synchronously, so it
+      //    must run inside the event handler before the browser recycles dataTransfer.
+      if (!e.dataTransfer.types.includes('Files')) return;
+      void collectDroppedEntries(e.dataTransfer).then((collected) => ingestDroppedEntries(collected));
     },
-    [processFiles],
+    [addWorkspaceReference, ingestDroppedEntries],
   );
 
   const handleSend = useCallback(() => {
     const msg = text.trim();
-    if ((!msg && attachments.length === 0) || !isConnected || sending) return;
+    const readyRefs = references.filter((r) => r.status === 'ready');
+    if ((!msg && attachments.length === 0 && readyRefs.length === 0) || !isConnected || sending) return;
+    if (references.some((r) => r.status === 'uploading')) {
+      message.warning(t('chat.refUploadingHint', { defaultValue: 'Some references are still uploading — please wait' }));
+      return;
+    }
 
     const doSend = () => {
       if (msg) {
@@ -246,8 +552,13 @@ export default function MessageInput() {
       setHistoryPopupOpen(false);
       setText('');
       setAttachments([]);
+      setReferences([]);
       try { localStorage.removeItem(DRAFT_STORAGE_PREFIX + sessionKey); } catch { /* ignore */ }
-      send(msg, attachments.length > 0 ? attachments : undefined);
+      send(
+        msg,
+        attachments.length > 0 ? attachments : undefined,
+        readyRefs.length > 0 ? { references: readyRefs.map((r) => r.path) } : undefined,
+      );
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
       }
@@ -277,7 +588,7 @@ export default function MessageInput() {
     }
 
     doSend();
-  }, [text, attachments, isConnected, sending, send, sessionKey, inputHistory, t]);
+  }, [text, attachments, references, isConnected, sending, send, sessionKey, inputHistory, t]);
 
   const abortShortcut = abortChatShortcutLabel();
   const abortTooltip = t('chat.abortWithShortcut', {
@@ -301,6 +612,8 @@ export default function MessageInput() {
 
     // Let slash command menu handle navigation keys first
     if (slashMenu.handleKeyDown(e)) return;
+    // Then the `@`-mention reference menu (mutually exclusive trigger chars)
+    if (refMenu.handleKeyDown(e)) return;
 
     // ── Input history navigation (ArrowUp / ArrowDown) ──
     const el = textareaRef.current;
@@ -361,11 +674,18 @@ export default function MessageInput() {
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setText(e.target.value);
+    setCaret(e.target.selectionStart ?? e.target.value.length);
     // Auto-resize
     const el = e.target;
     el.style.height = 'auto';
     resizeComposerInput(el);
   };
+
+  // Keep the caret position in sync for the `@`-mention detector (clicks, arrows).
+  const syncCaret = useCallback(() => {
+    const el = textareaRef.current;
+    if (el) setCaret(el.selectionStart ?? 0);
+  }, []);
 
   return (
     <div
@@ -377,45 +697,76 @@ export default function MessageInput() {
       <div className="chat-composer-panel">
       {attachments.length > 0 && (
         <div className="chat-composer-attachments">
-          {attachments.map((att) => (
-            <div key={att.id} style={{ position: 'relative', width: 64, height: 64 }}>
-              <img
-                src={att.dataUrl}
-                alt=""
-                style={{
-                  width: 64,
-                  height: 64,
-                  objectFit: 'cover',
-                  borderRadius: 4,
-                  border: '1px solid var(--border)',
-                }}
-              />
-              <button
-                onClick={() => removeAttachment(att.id)}
-                style={{
-                  position: 'absolute',
-                  top: -6,
-                  right: -6,
-                  width: 18,
-                  height: 18,
-                  borderRadius: '50%',
-                  border: '1px solid var(--border)',
-                  background: 'var(--surface)',
-                  color: 'var(--text-secondary)',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 10,
-                  lineHeight: 1,
-                  padding: 0,
-                }}
-                aria-label={t('common.remove', { defaultValue: 'Remove' })}
+          <Image.PreviewGroup>
+            {attachments.map((att) => (
+              <div key={att.id} className="chat-attachment">
+                <Image
+                  rootClassName="chat-attachment-thumb"
+                  src={att.dataUrl}
+                  alt=""
+                  width={64}
+                  height={64}
+                  preview={{ mask: t('chat.previewZoom', { defaultValue: '预览' }) }}
+                />
+                <button
+                  type="button"
+                  className="chat-attachment-remove"
+                  onClick={() => removeAttachment(att.id)}
+                  aria-label={t('common.remove', { defaultValue: 'Remove' })}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </Image.PreviewGroup>
+        </div>
+      )}
+
+      {attachNoVisionModel && (
+        <div className="chat-composer-novision" role="status">
+          {t('chat.attachNoVisionModel')}
+        </div>
+      )}
+
+      {references.length > 0 && (
+        <div className="chat-composer-references">
+          {references.map((ref) => {
+            const isDir = ref.path.endsWith('/');
+            const icon = isImagePath(ref.path)
+              ? <PictureOutlined />
+              : isDir
+                ? <FolderOutlined />
+                : <FileOutlined />;
+            return (
+              <div
+                key={ref.id}
+                className={`chat-reference-chip is-${ref.status}`}
+                title={ref.status === 'error' ? (ref.errorMsg || ref.path) : ref.path}
               >
-                ×
-              </button>
-            </div>
-          ))}
+                <span className="chat-reference-icon" aria-hidden="true">
+                  {ref.status === 'uploading' ? <LoadingOutlined spin /> : icon}
+                </span>
+                <span className="chat-reference-name">{ref.name}</span>
+                {ref.status === 'error' && (
+                  <button
+                    type="button"
+                    className="chat-reference-retry"
+                    onClick={() => retryReference(ref.id)}
+                  >
+                    {t('chat.refRetry', { defaultValue: 'Retry' })}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="chat-reference-remove"
+                  onClick={() => removeReference(ref.id)}
+                  aria-label={t('chat.refRemove', { defaultValue: 'Remove reference' })}
+                >
+                  <CloseOutlined />
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -427,6 +778,13 @@ export default function MessageInput() {
           onHover={slashMenu.setActiveIndex}
           visible={slashMenu.visible}
         />
+        <ReferenceMenu
+          items={refMenu.items}
+          activeIndex={refMenu.activeIndex}
+          onSelect={refMenu.handleSelect}
+          onHover={refMenu.setActiveIndex}
+          visible={refMenu.visible}
+        />
 
         <span className="chat-composer-prompt" aria-hidden="true">›</span>
 
@@ -436,6 +794,9 @@ export default function MessageInput() {
           value={text}
           onChange={handleInput}
           onKeyDown={handleKeyDown}
+          onKeyUp={syncCaret}
+          onClick={syncCaret}
+          onSelect={syncCaret}
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}
           onPaste={handlePaste}
@@ -451,7 +812,9 @@ export default function MessageInput() {
           multiple
           hidden
           onChange={(e) => {
-            if (e.target.files) processFiles(e.target.files);
+            if (e.target.files) {
+              for (const file of Array.from(e.target.files)) void ingestExternalFile(file, 'sources');
+            }
             e.target.value = '';
           }}
         />

@@ -32,6 +32,17 @@ import { useConfigStore } from '../../stores/config';
 import FilePreviewModal from './FilePreviewModal';
 import DockerFileModal from './DockerFileModal';
 import type { DockerFileModalProps } from './DockerFileModal';
+import { uploadFileToWorkspace } from '../../gateway/upload';
+import { MAX_REFERENCE_SIZE, safeUploadName } from '../../utils/file-reference';
+import {
+  collectDroppedEntries,
+  mapWithConcurrency,
+  splitRelPath,
+  MAX_DROP_FILES,
+  MAX_DROP_TOTAL_BYTES,
+  UPLOAD_CONCURRENCY,
+  type CollectedDrop,
+} from '../../utils/drop-entries';
 
 const { Text } = Typography;
 const { Dragger } = Upload;
@@ -1182,19 +1193,7 @@ export default function WorkspacePanel() {
 
   const uploadOneFile = useCallback(
     async (file: File): Promise<boolean> => {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('destination', 'sources/');
-      const token = new URLSearchParams(window.location.search).get('token') || 'research-claw';
-      const res = await fetch('/rc/upload', {
-        method: 'POST',
-        body: formData,
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body?.error?.message ?? `Upload failed (${res.status})`);
-      }
+      await uploadFileToWorkspace(file, 'sources');
       return true;
     },
     [],
@@ -1270,17 +1269,92 @@ export default function WorkspacePanel() {
     }
   }, [isExternalFileDrag]);
 
+  /** Upload a flattened drop into sources/, preserving any folder structure. */
+  const uploadDroppedToWorkspace = useCallback(
+    async (collected: CollectedDrop) => {
+      const all = collected.files;
+      if (all.length === 0) return;
+
+      const oversized = all.filter((d) => d.file.size > MAX_REFERENCE_SIZE);
+      const kept = all.filter((d) => d.file.size <= MAX_REFERENCE_SIZE);
+      if (oversized.length > 0) {
+        message.warning(
+          t('workspace.uploadSkippedLarge', {
+            count: oversized.length,
+            limit: Math.round(MAX_REFERENCE_SIZE / (1024 * 1024)),
+            defaultValue: `${oversized.length} file(s) over ${Math.round(MAX_REFERENCE_SIZE / (1024 * 1024))}MB were skipped`,
+          }),
+        );
+      }
+      if (kept.length === 0) return;
+
+      const totalBytes = kept.reduce((sum, d) => sum + d.file.size, 0);
+      if (kept.length > MAX_DROP_FILES || totalBytes > MAX_DROP_TOTAL_BYTES) {
+        const ok = await new Promise<boolean>((resolve) => {
+          Modal.confirm({
+            title: t('workspace.uploadBulkTitle', { defaultValue: 'Upload many files?' }),
+            content: t('workspace.uploadBulkContent', {
+              count: kept.length,
+              size: Math.round(totalBytes / (1024 * 1024)),
+              defaultValue: `This drop contains ${kept.length} files (~${Math.round(totalBytes / (1024 * 1024))}MB). Upload all of them?`,
+            }),
+            okText: t('workspace.uploadBulkConfirm', { defaultValue: 'Upload all' }),
+            onOk: () => resolve(true),
+            onCancel: () => resolve(false),
+          });
+        });
+        if (!ok) return;
+      }
+
+      if (uploading) return;
+      setUploading(true);
+      let successCount = 0;
+      let failCount = 0;
+      try {
+        await mapWithConcurrency(kept, UPLOAD_CONCURRENCY, async (d) => {
+          const { subDir, fileName } = splitRelPath(d.relPath, d.rootDir, safeUploadName);
+          const destDir = subDir ? `sources/${subDir}` : 'sources';
+          try {
+            await uploadFileToWorkspace(d.file, destDir, fileName);
+            successCount++;
+          } catch (err) {
+            failCount++;
+            console.error(`[WorkspacePanel] upload failed for ${d.relPath}:`, err);
+          }
+        });
+        if (successCount > 0) {
+          message.success(
+            t('workspace.uploadSuccessWithPath', {
+              count: successCount,
+              path: 'sources/',
+              defaultValue: `${successCount} file(s) uploaded to sources/`,
+            }),
+          );
+        }
+        if (failCount > 0) {
+          message.error(
+            t('workspace.uploadFailedMulti', { count: failCount, defaultValue: `${failCount} file(s) failed to upload` }),
+          );
+        }
+        await loadData();
+        setTimeout(() => loadData(), 1000);
+      } finally {
+        setUploading(false);
+      }
+    },
+    [uploading, loadData, t, message],
+  );
+
   const handlePanelDrop = useCallback((e: React.DragEvent) => {
     if (!isExternalFileDrag(e)) return;
     e.preventDefault();
     dragEnterCounterRef.current = 0;
     setExternalDragOver(false);
 
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length > 0) {
-      handleUpload(files[0], files);
-    }
-  }, [isExternalFileDrag, handleUpload]);
+    // collectDroppedEntries captures dataTransfer entries synchronously, then
+    // expands dropped folders before uploading (preserving directory structure).
+    void collectDroppedEntries(e.dataTransfer).then((collected) => uploadDroppedToWorkspace(collected));
+  }, [isExternalFileDrag, uploadDroppedToWorkspace]);
 
   return (
     <div

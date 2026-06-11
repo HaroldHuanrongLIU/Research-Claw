@@ -145,6 +145,8 @@ export default function ChatView() {
   const sending = useChatStore((s) => s.sending);
   const lastError = useChatStore((s) => s.lastError);
   const clearError = useChatStore((s) => s.clearError);
+  const canContinue = useChatStore((s) => s.canContinue);
+  const continueRun = useChatStore((s) => s.continueRun);
   const loadHistory = useChatStore((s) => s.loadHistory);
   const loadSessionUsage = useChatStore((s) => s.loadSessionUsage);
   const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
@@ -614,6 +616,11 @@ export default function ChatView() {
               description={lastError}
               action={
                 <Space size="small">
+                  {canContinue && (
+                    <Button type="primary" size="small" onClick={continueRun}>
+                      {t('chat.continueRun')}
+                    </Button>
+                  )}
                   <Button size="small" onClick={() => setRightPanelTab('settings')}>
                     {t('chat.openSettings')}
                   </Button>

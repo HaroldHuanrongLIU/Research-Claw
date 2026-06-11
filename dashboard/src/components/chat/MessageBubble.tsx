@@ -9,11 +9,14 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   LoadingOutlined,
+  FileOutlined,
+  FolderOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ChatMessage } from '../../gateway/types';
 import { safeStringifyDetail } from '../../utils/activity-log';
 import { useGatewayStore } from '../../stores/gateway';
+import { basenameOf, isImagePath } from '../../utils/file-reference';
 import { sanitizeUserMessage } from '../../utils/sanitize-message';
 import { sanitizeAssistantMessage, sanitizeAssistantRawCopy } from '../../utils/sanitize-assistant-message';
 import {
@@ -30,6 +33,9 @@ interface ImageBlock {
 
 /** Pattern for workspace image markers embedded by chat.send image routing. */
 const RC_IMAGE_RE = /\[rc-image:([\w./_-]+)\]/g;
+
+/** Pattern for the referenced-files block appended by appendReferenceBlock(). */
+const RC_REFERENCE_BLOCK_RE = /\n*\[引用文件 \/ Referenced files\]\n((?:[ \t]*-[ \t]*@[^\n]+\n?)+)/;
 
 /**
  * Extract image blocks from message content array.
@@ -191,6 +197,20 @@ function stripImageMarkers(text: string): string {
     .trimEnd();
 }
 
+/** Extract referenced workspace paths from the `[引用文件]` block (after reload). */
+export function parseReferenceBlock(text: string): string[] {
+  const m = text.match(RC_REFERENCE_BLOCK_RE);
+  if (!m) return [];
+  return [...m[1].matchAll(/-[ \t]*@([^\n]+)/g)]
+    .map((x) => x[1].trim())
+    .filter(Boolean);
+}
+
+/** Strip the `[引用文件]` block from display text (rendered as chips instead). */
+export function stripReferenceBlock(text: string): string {
+  return text.replace(RC_REFERENCE_BLOCK_RE, '').trimEnd();
+}
+
 interface MessageBubbleProps {
   message: ChatMessage;
   isStreaming?: boolean;
@@ -234,7 +254,7 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
     const copyText = msg.role === 'user'
       ? sanitizeUserMessage(raw)
       : sanitizeAssistantMessage(raw);
-    navigator.clipboard.writeText(stripImageMarkers(copyText)).then(() => {
+    navigator.clipboard.writeText(stripReferenceBlock(stripImageMarkers(copyText))).then(() => {
       setCopied('visible');
       setTimeout(() => setCopied(false), 2000);
     }).catch(() => { /* clipboard unavailable */ });
@@ -282,8 +302,16 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
   // For assistant messages: strip all internal scaffolding (sanitize-assistant-message.ts)
   const preText = isUser ? sanitizeUserMessage(rawText) : sanitizeAssistantMessage(rawText);
 
-  // Strip [rc-image:...] markers from display (images rendered separately)
-  const text = stripImageMarkers(preText);
+  // Strip [rc-image:...] markers + [引用文件] block from display (rendered separately)
+  const text = stripReferenceBlock(stripImageMarkers(preText));
+
+  // Non-image referenced files: from optimistic message.references, or parsed
+  // from the [引用文件] block after a history reload. Rendered as chips.
+  const fileReferences = (
+    message.references && message.references.length > 0
+      ? message.references
+      : parseReferenceBlock(rawText)
+  ).filter((p) => !isImagePath(p));
 
   // Extract thinking content for separate rendering (assistant only)
   // Source: message-extract.ts:41-69 (extractThinking)
@@ -413,6 +441,17 @@ export default function MessageBubble({ message, isStreaming }: MessageBubblePro
                 />
               ))}
             </Image.PreviewGroup>
+          </div>
+        )}
+
+        {isUser && fileReferences.length > 0 && (
+          <div className="chat-msg-references" style={{ marginBottom: text ? 12 : 0 }}>
+            {fileReferences.map((p) => (
+              <span key={p} className="chat-msg-reference-chip" title={p}>
+                {p.endsWith('/') ? <FolderOutlined /> : <FileOutlined />}
+                <span className="chat-msg-reference-name">{basenameOf(p)}</span>
+              </span>
+            ))}
           </div>
         )}
 

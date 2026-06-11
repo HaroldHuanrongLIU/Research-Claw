@@ -4,7 +4,7 @@ import { vi } from 'vitest';
 export function parityConfigStoreMock() {
   return {
     primaryModelSupportsVision: vi.fn(() => true),
-    hasImageModelConfigured: vi.fn(() => true),
+    imageModelSupportsVision: vi.fn(() => true),
     useConfigStore: {
       getState: () => ({ systemPromptAppend: '' }),
     },

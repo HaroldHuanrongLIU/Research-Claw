@@ -1183,7 +1183,7 @@ export default function SettingsPanel() {
           textModel: textModel.trim(),
           visionEnabled,
           visionProvider: visionEnabled ? visionProvider : undefined,
-          visionModel: visionEnabled ? visionModel.trim() || undefined : undefined,
+          visionModel: visionEnabled ? (visionModel.trim() || null) : null,
           visionBaseUrl: visionEnabled && visionSeparateProvider ? visionBaseUrl.trim() || undefined : undefined,
           visionApiKey: visionEnabled && visionSeparateProvider ? visionApiKeyToSend : undefined,
           visionApi: visionEnabled && visionSeparateProvider ? visionApi : undefined,

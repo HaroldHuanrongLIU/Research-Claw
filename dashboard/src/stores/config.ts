@@ -426,10 +426,27 @@ export function primaryModelSupportsVision(): boolean {
 }
 
 /**
- * Check whether an imageModel is configured (for /image tool fallback).
+ * Check whether the configured imageModel (the /image-tool model) can accept
+ * image input. Unlike a bare existence check, this resolves the model in the
+ * provider catalog and inspects its input modalities — so a text-only model
+ * mistakenly set as imageModel is correctly treated as "no vision" and blocked
+ * at send time instead of failing late inside the /image tool.
+ * Fail-closed: a missing or unresolvable ref returns false.
  */
-export function hasImageModelConfigured(): boolean {
+export function imageModelSupportsVision(): boolean {
   const cfg = useConfigStore.getState().gatewayConfig;
-  const ref = cfg?.agents?.defaults?.imageModel?.primary;
-  return !!ref && ref.includes('/');
+  if (!cfg) return false;
+
+  const ref = cfg.agents?.defaults?.imageModel?.primary;
+  if (!ref) return false;
+
+  const slashIdx = ref.indexOf('/');
+  if (slashIdx < 0) return false;
+
+  const providerKey = ref.slice(0, slashIdx);
+  const modelId = ref.slice(slashIdx + 1);
+  const providerDef = cfg.models?.providers?.[providerKey];
+  const modelDef = providerDef?.models?.find((m) => m.id === modelId);
+
+  return modelDef?.input?.includes('image') ?? false;
 }

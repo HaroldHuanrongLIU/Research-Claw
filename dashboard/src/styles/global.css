@@ -352,7 +352,7 @@ html, body {
   flex: 0 0 auto;
   position: relative;
   z-index: 10;
-  max-height: min(200px, 32vh);
+  max-height: min(62vh, 480px);
   overflow: hidden;
   background: var(--bg);
   border-top: 1px solid var(--border);
@@ -570,6 +570,37 @@ html, body {
 .chat-turn-system .chat-turn-body {
   color: var(--text-secondary);
   font-size: 15px;
+}
+
+.chat-msg-references {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat-msg-reference-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.04));
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.chat-msg-reference-chip .anticon {
+  flex-shrink: 0;
+  color: var(--accent, #ef4444);
+}
+
+.chat-msg-reference-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-thinking {
@@ -825,8 +856,7 @@ html, body {
 /* Composer — flat prompt bar with user-style frame */
 .chat-composer {
   flex-shrink: 0;
-  height: 100%;
-  max-height: min(200px, 32vh);
+  max-height: min(62vh, 480px);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -856,6 +886,170 @@ html, body {
   gap: 8px;
   padding: 12px 14px 0;
   flex-wrap: wrap;
+  flex-shrink: 0;
+  max-height: 156px;
+  overflow-y: auto;
+}
+
+.chat-attachment {
+  position: relative;
+  width: 64px;
+  height: 64px;
+}
+
+.chat-attachment-thumb {
+  display: block;
+  width: 64px;
+  height: 64px;
+}
+
+.chat-attachment-thumb .ant-image-img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.chat-attachment-thumb .ant-image-mask {
+  border-radius: 4px;
+}
+
+.chat-attachment-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+
+/* Reveal the remove control on hover (desktop) — keeps the thumbnail clean */
+.chat-attachment:hover .chat-attachment-remove,
+.chat-attachment-remove:focus-visible {
+  opacity: 1;
+}
+
+.chat-attachment-remove:hover {
+  background: var(--accent-primary);
+}
+
+/* Touch / no-hover devices have no hover affordance — keep it always visible */
+@media (hover: none) {
+  .chat-attachment-remove {
+    opacity: 1;
+  }
+}
+
+/* Attach-time hint: image added but no vision-capable model configured. */
+.chat-composer-novision {
+  margin: 8px 14px 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--warning, #d97706);
+  background: color-mix(in srgb, var(--warning, #d97706) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning, #d97706) 32%, transparent);
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+/* --- File reference chip tray --- */
+.chat-composer-references {
+  display: flex;
+  gap: 6px;
+  padding: 12px 14px 0;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  max-height: 96px;
+  overflow-y: auto;
+}
+
+.chat-reference-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 3px 6px 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.chat-reference-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--accent-secondary);
+}
+
+.chat-reference-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-reference-chip.is-uploading {
+  opacity: 0.75;
+}
+
+.chat-reference-chip.is-error {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.chat-reference-chip.is-error .chat-reference-icon {
+  color: var(--accent-primary);
+}
+
+.chat-reference-retry {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--accent-primary);
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.chat-reference-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.chat-reference-remove:hover,
+.chat-reference-remove:focus-visible {
+  color: #fff;
+  background: var(--accent-primary);
 }
 
 .chat-composer-bar {
@@ -864,8 +1058,8 @@ html, body {
   align-items: flex-end;
   gap: 6px;
   padding: 12px 14px;
-  flex: 1;
-  min-height: 0;
+  flex: 1 1 auto;
+  min-height: 54px;
   overflow: hidden;
 }
 

@@ -268,7 +268,7 @@ export default function SetupWizard() {
           textModel: textModel.trim(),
           visionEnabled,
           visionProvider: visionEnabled ? visionProvider : undefined,
-          visionModel: visionEnabled ? visionModel.trim() || undefined : undefined,
+          visionModel: visionEnabled ? (visionModel.trim() || null) : null,
           visionBaseUrl: visionEnabled && visionProvider !== provider ? visionBaseUrl.trim() || undefined : undefined,
           visionApiKey: visionEnabled && visionProvider !== provider ? (visionApiKey.trim() || undefined) : undefined,
           visionApi: visionEnabled && visionProvider !== provider ? visionApi : undefined,

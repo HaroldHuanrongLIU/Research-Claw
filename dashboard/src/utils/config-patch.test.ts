@@ -275,7 +275,7 @@ describe('buildSaveConfig', () => {
       textModel: 'gpt-4o',
       visionEnabled: false,
       visionProvider: 'zai',
-      visionModel: 'glm-4.6v',
+      visionModel: null, // tri-state: null = explicitly disable vision
     });
 
     const providers = (config.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
@@ -284,6 +284,157 @@ describe('buildSaveConfig', () => {
     const defaults = (config.agents as Record<string, unknown>).defaults as Record<string, unknown>;
     // When vision disabled, imageModel = text model
     expect((defaults.imageModel as Record<string, string>).primary).toBe('openai/gpt-4o');
+  });
+
+  // ── Tri-state visionModel persistence (P1 root-cause regression guards) ──
+
+  it('preserves a separate vision model across a save that does not touch vision (undefined)', () => {
+    // Prior: text=deepseek (text-only), independent vision=zai/glm-4.6v (vision-capable).
+    const prev = {
+      agents: {
+        defaults: {
+          model: { primary: 'deepseek/deepseek-v4-pro' },
+          imageModel: { primary: 'zai/glm-4.6v' },
+        },
+      },
+      models: {
+        providers: {
+          deepseek: {
+            baseUrl: 'https://api.deepseek.com',
+            api: 'openai-completions',
+            models: [{ id: 'deepseek-v4-pro', input: ['text'] }],
+          },
+          zai: {
+            baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+            api: 'openai-completions',
+            apiKey: 'sk-zai',
+            models: [{ id: 'glm-4.6v', input: ['text', 'image'] }],
+          },
+        },
+      },
+    };
+
+    // User re-saves the text provider only — visionModel omitted (undefined → preserve).
+    const config = buildSaveConfig(prev as unknown as Record<string, unknown>, {
+      provider: 'deepseek',
+      baseUrl: 'https://api.deepseek.com',
+      api: 'openai-completions',
+      textModel: 'deepseek-v4-pro',
+    } as ConfigPatchInput);
+
+    const defaults = (config.agents as Record<string, unknown>).defaults as Record<string, unknown>;
+    // The vision model must survive — this is the self-locking-wipe bug.
+    expect((defaults.imageModel as Record<string, string>).primary).toBe('zai/glm-4.6v');
+    const providers = (config.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
+    expect(providers.zai).toBeDefined();
+    expect(providers.zai.apiKey).toBe('sk-zai');
+  });
+
+  it('clears vision when visionModel is explicitly null (imageModel mirrors text)', () => {
+    const prev = {
+      agents: {
+        defaults: {
+          model: { primary: 'deepseek/deepseek-v4-pro' },
+          imageModel: { primary: 'zai/glm-4.6v' },
+        },
+      },
+      models: {
+        providers: {
+          deepseek: {
+            baseUrl: 'https://api.deepseek.com',
+            api: 'openai-completions',
+            models: [{ id: 'deepseek-v4-pro', input: ['text'] }],
+          },
+          zai: {
+            baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+            api: 'openai-completions',
+            models: [{ id: 'glm-4.6v', input: ['text', 'image'] }],
+          },
+        },
+      },
+    };
+
+    const config = buildSaveConfig(prev as unknown as Record<string, unknown>, {
+      provider: 'deepseek',
+      baseUrl: 'https://api.deepseek.com',
+      api: 'openai-completions',
+      textModel: 'deepseek-v4-pro',
+      visionModel: null, // explicit off
+    } as ConfigPatchInput);
+
+    const defaults = (config.agents as Record<string, unknown>).defaults as Record<string, unknown>;
+    expect((defaults.imageModel as Record<string, string>).primary).toBe('deepseek/deepseek-v4-pro');
+  });
+
+  it('preserves a same-provider vision model across a save that does not touch vision', () => {
+    // Prior: text=zai/glm-5 (text-only) and vision=zai/glm-4.6v live in the SAME provider entry.
+    const prev = {
+      agents: {
+        defaults: {
+          model: { primary: 'zai/glm-5' },
+          imageModel: { primary: 'zai/glm-4.6v' },
+        },
+      },
+      models: {
+        providers: {
+          zai: {
+            baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+            api: 'openai-completions',
+            apiKey: 'sk-zai',
+            models: [
+              { id: 'glm-5', input: ['text'] },
+              { id: 'glm-4.6v', input: ['text', 'image'] },
+            ],
+          },
+        },
+      },
+    };
+
+    const config = buildSaveConfig(prev as unknown as Record<string, unknown>, {
+      provider: 'zai',
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      api: 'openai-completions',
+      textModel: 'glm-5',
+    } as ConfigPatchInput);
+
+    const defaults = (config.agents as Record<string, unknown>).defaults as Record<string, unknown>;
+    expect((defaults.imageModel as Record<string, string>).primary).toBe('zai/glm-4.6v');
+
+    // The same-provider rebuild must re-add the vision model so the ref is not orphaned.
+    const providers = (config.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
+    const models = providers.zai.models as Array<{ id: string; input: string[] }>;
+    expect(models.some((m) => m.id === 'glm-4.6v' && m.input.includes('image'))).toBe(true);
+  });
+
+  it('falls back to text model when preserved imageModel points to a now-deleted provider', () => {
+    const prev = {
+      agents: {
+        defaults: {
+          model: { primary: 'deepseek/deepseek-v4-pro' },
+          imageModel: { primary: 'zai/glm-4.6v' },
+        },
+      },
+      models: {
+        providers: {
+          deepseek: {
+            baseUrl: 'https://api.deepseek.com',
+            api: 'openai-completions',
+            models: [{ id: 'deepseek-v4-pro', input: ['text'] }],
+          },
+          // zai intentionally absent → stale imageModel ref must not survive
+        },
+      },
+    };
+
+    const config = buildSaveConfig(prev as unknown as Record<string, unknown>, {
+      provider: 'deepseek',
+      baseUrl: 'https://api.deepseek.com',
+      api: 'openai-completions',
+      textModel: 'deepseek-v4-pro',
+    } as ConfigPatchInput);
+
+    const defaults = (config.agents as Record<string, unknown>).defaults as Record<string, unknown>;
+    expect((defaults.imageModel as Record<string, string>).primary).toBe('deepseek/deepseek-v4-pro');
   });
 
   it('falls back to text provider apiKey for vision when visionApiKey is not set', () => {
