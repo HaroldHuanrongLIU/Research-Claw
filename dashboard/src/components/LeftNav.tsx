@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Dropdown, Input, Modal, Tooltip, Typography } from 'antd';
+import { App, Button, Dropdown, Input, Modal, Tooltip, Typography } from 'antd';
 import {
   ApiOutlined,
   BookOutlined,
@@ -70,6 +70,7 @@ function getSessionName(session: { key: string; label?: string; derivedTitle?: s
 
 export default function LeftNav() {
   const { t } = useTranslation();
+  const { modal } = App.useApp();
   const collapsed = useUiStore((s) => s.leftNavCollapsed);
   const toggleLeftNav = useUiStore((s) => s.toggleLeftNav);
   const rightPanelTab = useUiStore((s) => s.rightPanelTab);
@@ -87,6 +88,9 @@ export default function LeftNav() {
   const renameSession = useSessionsStore((s) => s.renameSession);
   const isMainSession = useSessionsStore((s) => s.isMainSession);
 
+  const [renameTarget, setRenameTarget] = useState<{ key: string; current: string } | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+
   useEffect(() => {
     loadSessions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -101,37 +105,53 @@ export default function LeftNav() {
   };
 
   const handleRename = (key: string, currentLabel: string) => {
-    const newLabel = prompt(t('project.renamePrompt'), currentLabel);
-    if (newLabel !== null && newLabel !== currentLabel) {
-      renameSession(key, newLabel);
+    setRenameTarget({ key, current: currentLabel });
+    setRenameValue(currentLabel);
+  };
+
+  const handleRenameOk = () => {
+    if (!renameTarget) return;
+    const next = renameValue.trim();
+    if (next && next !== renameTarget.current) {
+      renameSession(renameTarget.key, next);
     }
+    setRenameTarget(null);
   };
 
   const handleDelete = (key: string) => {
     if (isMainSession(key)) return;
-    if (confirm(t('project.deleteConfirm'))) {
-      deleteSession(key);
-    }
+    modal.confirm({
+      title: t('project.deleteConfirm'),
+      okText: t('common.ok', 'OK'),
+      okButtonProps: { danger: true },
+      cancelText: t('common.cancel', 'Cancel'),
+      centered: true,
+      onOk: () => {
+        deleteSession(key);
+      },
+    });
   };
 
   const handleClearSession = useCallback((key: string, name: string) => {
-    Modal.confirm({
+    modal.confirm({
       title: t('project.clearConfirmTitle', { name }),
       content: t('project.clearConfirmContent'),
       okText: t('common.ok', 'OK'),
       okButtonProps: { danger: true },
       cancelText: t('common.cancel', 'Cancel'),
+      centered: true,
       onOk: async () => {
         await clearSession(key);
       },
     });
-  }, [t, clearSession]);
+  }, [modal, t, clearSession]);
 
   const handleDeleteCronSession = useCallback((key: string) => {
-    Modal.confirm({
+    modal.confirm({
       title: t('cron.deleteSessionConfirm'),
       okText: t('common.ok', 'OK'),
       cancelText: t('common.cancel', 'Cancel'),
+      centered: true,
       onOk: async () => {
         const session = sessions.find((s) => s.key === key);
         const label = session ? getSessionName(session, t) : key;
@@ -140,7 +160,7 @@ export default function LeftNav() {
         await loadSessions();
       },
     });
-  }, [sessions, t, deleteSession, loadSessions]);
+  }, [modal, sessions, t, deleteSession, loadSessions]);
 
   // ── Session switcher dropdown content ───────────────────────────────────────
 
@@ -541,6 +561,28 @@ export default function LeftNav() {
           />
         </Tooltip>
       </div>
+
+      <Modal
+        title={t('project.renameTitle')}
+        open={renameTarget !== null}
+        onOk={handleRenameOk}
+        onCancel={() => setRenameTarget(null)}
+        okText={t('common.ok', 'OK')}
+        cancelText={t('common.cancel', 'Cancel')}
+        centered
+        destroyOnClose
+      >
+        <Input
+          autoFocus
+          value={renameValue}
+          onChange={(e) => setRenameValue(e.target.value)}
+          onPressEnter={(e) => {
+            if ((e.nativeEvent as { isComposing?: boolean }).isComposing) return;
+            handleRenameOk();
+          }}
+          placeholder={t('project.renamePrompt')}
+        />
+      </Modal>
     </div>
   );
 }

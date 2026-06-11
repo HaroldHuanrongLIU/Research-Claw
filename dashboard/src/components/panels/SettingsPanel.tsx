@@ -397,6 +397,40 @@ function AboutSection() {
 
 // --- Main SettingsPanel (single scrollable panel) ---
 
+type ModelOption = { value: string; label: string };
+
+/**
+ * Options come from the static preset snapshot, then merge in models actually
+ * present in the saved gateway config plus the current value — so a configured
+ * model that the snapshot lacks (e.g. glm-5v-turbo) stays selectable after the
+ * field is cleared. imageOnly keeps the vision picker to image-capable models
+ * but never hides the current value.
+ */
+function buildModelOptions(
+  presetModels: ReadonlyArray<{ id: string; name?: string; input?: string[] }>,
+  savedModels: ReadonlyArray<{ id: string; name?: string; input?: string[] }> | undefined,
+  currentValue: string,
+  imageOnly = false,
+): ModelOption[] {
+  const seen = new Set<string>();
+  const out: ModelOption[] = [];
+  const add = (id: string, name?: string) => {
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    out.push({ value: id, label: name && name !== id ? `${id} — ${name}` : id });
+  };
+  for (const m of presetModels) {
+    if (imageOnly && !m.input?.includes('image')) continue;
+    add(m.id, m.name);
+  }
+  for (const m of savedModels ?? []) {
+    if (imageOnly && !m.input?.includes('image') && m.id !== currentValue) continue;
+    add(m.id, m.name);
+  }
+  if (currentValue) add(currentValue);
+  return out;
+}
+
 export default function SettingsPanel() {
   const { t } = useTranslation();
   const { modal, message } = App.useApp();
@@ -954,18 +988,19 @@ export default function SettingsPanel() {
   }, [authConfiguredByProvider, gatewayConfig]);
 
   const currentPreset = getPreset(provider);
-  const modelOptions = currentPreset.models.map((m) => ({
-    value: m.id,
-    label: `${m.id} — ${m.name}`,
-  }));
+  const modelOptions = buildModelOptions(
+    currentPreset.models,
+    gatewayConfig?.models?.providers?.[provider]?.models,
+    textModel,
+  );
 
   const visionPreset = getPreset(visionProvider);
-  const visionModelOptions = visionPreset.models
-    .filter((m) => m.input?.includes('image'))
-    .map((m) => ({
-      value: m.id,
-      label: `${m.id} — ${m.name}`,
-    }));
+  const visionModelOptions = buildModelOptions(
+    visionPreset.models,
+    gatewayConfig?.models?.providers?.[visionProvider]?.models,
+    visionModel,
+    true,
+  );
 
   // Load gateway config when connected
   useEffect(() => {
@@ -1668,21 +1703,28 @@ export default function SettingsPanel() {
           </SettingRow>
 
           <SettingRow label={t('settings.visionModel')}>
-            <AutoComplete
-              value={visionModel}
-              onChange={(v) => {
-                setVisionModel(v);
-                if (v.trim()) visionModelCacheRef.current[visionProvider] = v.trim();
-              }}
-              options={visionModelOptions}
-              allowClear
-              size="small"
-              style={{ width: 220 }}
-              placeholder={t('settings.noVisionModel')}
-              filterOption={(input, option) =>
-                (option?.value ?? '').toLowerCase().includes(input.toLowerCase())
-              }
-            />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <AutoComplete
+                value={visionModel}
+                onChange={(v) => {
+                  setVisionModel(v);
+                  if (v.trim()) visionModelCacheRef.current[visionProvider] = v.trim();
+                }}
+                options={visionModelOptions}
+                allowClear
+                size="small"
+                style={{ width: 220 }}
+                placeholder={t('settings.noVisionModel')}
+                filterOption={(input, option) =>
+                  (option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+                }
+              />
+              {visionModelOptions.length === 0 && (
+                <span style={{ fontSize: 11, color: 'var(--text-tertiary)', maxWidth: 220 }}>
+                  {t('settings.noVisionModelHint')}
+                </span>
+              )}
+            </div>
           </SettingRow>
 
           {/* Vision API URL + Key — only when different provider */}

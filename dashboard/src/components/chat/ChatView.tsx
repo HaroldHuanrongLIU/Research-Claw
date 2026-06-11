@@ -244,10 +244,14 @@ export default function ChatView() {
       const root = scrollRef.current;
       if (!root) return;
 
-      const rootTop = root.getBoundingClientRect().top;
+      const rootRect = root.getBoundingClientRect();
+      const rootTop = rootRect.top;
+      const rootBottom = rootRect.bottom;
       const tolerance = 1;
 
-      // Pin context only after the in-flow user bubble has scrolled fully above the viewport.
+      // The pinned anchor is the user question whose answer currently fills the
+      // top of the viewport: the highest-index user bubble scrolled fully above
+      // the top edge.
       let bestIdx: number | null = null;
       for (const [idxStr, node] of Object.entries(userElRefs.current)) {
         if (!node) continue;
@@ -258,15 +262,26 @@ export default function ChatView() {
         }
       }
 
-      if (bestIdx === null) {
-        stickyUserIndexRef.current = null;
-        setStickyUserMessage(null);
-        return;
+      // Suppress when a LATER user turn is already visible in the viewport. Its
+      // question is on screen, so a pinned copy of an earlier question (the
+      // anchor floats at top:0 with z-index) would only obscure the message the
+      // user is actually looking at.
+      if (bestIdx !== null) {
+        for (const [idxStr, node] of Object.entries(userElRefs.current)) {
+          if (!node) continue;
+          const idx = Number(idxStr);
+          if (idx <= bestIdx) continue;
+          const r = node.getBoundingClientRect();
+          if (r.top < rootBottom && r.bottom > rootTop) {
+            bestIdx = null;
+            break;
+          }
+        }
       }
-      if (stickyUserIndexRef.current === bestIdx) return;
 
+      if (stickyUserIndexRef.current === bestIdx) return;
       stickyUserIndexRef.current = bestIdx;
-      setStickyUserMessage(messagesRef.current[bestIdx] ?? null);
+      setStickyUserMessage(bestIdx === null ? null : (messagesRef.current[bestIdx] ?? null));
     });
   }, []);
 

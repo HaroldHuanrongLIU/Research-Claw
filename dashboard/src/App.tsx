@@ -1,5 +1,7 @@
 import React, { useEffect, useCallback, Suspense, useState } from 'react';
 import { App as AntdApp, ConfigProvider, Spin, Result, Button, Input, Space, Typography } from 'antd';
+import zhCN from 'antd/locale/zh_CN';
+import enUS from 'antd/locale/en_US';
 import { useTranslation } from 'react-i18next';
 import { buildAppShellGrid, buildOverlayPanelLayout } from './utils/config-panel-layout';
 import { getAntdThemeConfig } from './styles/theme';
@@ -81,6 +83,7 @@ const PANEL_TAB_ORDER: PanelTab[] = ['library', 'workspace', 'review', 'tasks', 
 export default function App() {
   const { t } = useTranslation();
   const theme = useConfigStore((s) => s.theme);
+  const locale = useConfigStore((s) => s.locale);
   const bootState = useConfigStore((s) => s.bootState);
   const loadConfig = useConfigStore((s) => s.loadConfig);
   const setBootState = useConfigStore((s) => s.setBootState);
@@ -307,12 +310,13 @@ export default function App() {
   }, [setRightPanelTab]);
 
   const antdTheme = getAntdThemeConfig(theme);
+  const antdLocale = locale === 'zh-CN' ? zhCN : enUS;
 
   // --- Boot state guards ---
 
   if (bootState === 'pending') {
     return (
-      <ConfigProvider theme={antdTheme}>
+      <ConfigProvider theme={antdTheme} locale={antdLocale}>
         <AntdApp>
           <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', gap: 16 }}>
             <Spin size="large" />
@@ -325,7 +329,7 @@ export default function App() {
 
   if (bootState === 'gateway_unreachable') {
     return (
-      <ConfigProvider theme={antdTheme}>
+      <ConfigProvider theme={antdTheme} locale={antdLocale}>
         <AntdApp>
           <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
             <Result
@@ -350,7 +354,7 @@ export default function App() {
     // Clear stale cached token so we don't keep retrying a bad value
     try { localStorage.removeItem(TOKEN_STORAGE_KEY); } catch { /* non-fatal */ }
     return (
-      <ConfigProvider theme={antdTheme}>
+      <ConfigProvider theme={antdTheme} locale={antdLocale}>
         <AntdApp>
           <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
             <Result
@@ -427,7 +431,7 @@ export default function App() {
 
   if (bootState === 'needs_setup') {
     return (
-      <ConfigProvider theme={antdTheme}>
+      <ConfigProvider theme={antdTheme} locale={antdLocale}>
         <AntdApp>
           <SetupWizard />
         </AntdApp>
@@ -460,7 +464,7 @@ export default function App() {
     : null;
 
   return (
-    <ConfigProvider theme={antdTheme}>
+    <ConfigProvider theme={antdTheme} locale={antdLocale}>
       <AntdApp>
       <CronEventListener />
       <PaperReviewRunListener />

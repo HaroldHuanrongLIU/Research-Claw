@@ -1,4 +1,8 @@
 {
+  "common": {
+    "ok": "OK",
+    "cancel": "Cancel"
+  },
   "app": {
     "name": "WentorOS·ResearchClaw",
     "tagline": "AI-Powered Academic Research Assistant"
@@ -90,8 +94,7 @@
     "dropFolderAllFailed": "All files in this folder failed to upload",
     "dropFolderPartial": "{{failed}}/{{total}} files in the folder failed to upload",
     "thinkingLabel": "Thinking",
-    "imageNotSupported": "Current model does not support image input. Please enable a separate vision model in Settings, or switch to a model that supports images (e.g. Claude, GPT-4o).",
-    "attachNoVisionModel": "Image attached, but the current model can't read images. Enable a separate vision model in Settings first, otherwise the image will be ignored when sent.",
+    "attachNoVisionModel": "Image attached. The current model can't view images directly — it'll be saved to the workspace and the assistant will try to read it with its tools (e.g. OCR, code). For reliable image understanding, enable a separate vision model in Settings.",
     "bgWorking": "Working in background...",
     "activityHistory": "Activity history",
     "noActivityYet": "No activity yet",
@@ -152,7 +155,10 @@
     "directGlobal": "Global",
     "selected": "Selected",
     "addCustomProfile": "Add custom API profile",
-    "addCustomProfileHint": "Enter URL, API key, and model in settings below, then Save"
+    "addCustomProfileHint": "Enter URL, API key, and model in settings below, then Save",
+    "unstableWarnTitle": "Use this provider with caution",
+    "unstableWarnBody": "This provider may be unstable due to limited maintenance. Use it with caution. We recommend OpenAI, DeepSeek, Kimi, MiniMax, or Zhipu GLM (API and Coding).",
+    "unstableWarnContinue": "Use anyway"
   },
   "providerVariants": {
     "title": "Variant",
@@ -657,6 +663,7 @@
     "aboutDiagnostics": "Copy diagnostics",
     "aboutDiagnosticsCopied": "Diagnostics copied to clipboard",
     "noVisionModel": "Same as text model",
+    "noVisionModelHint": "This provider has no preset vision model; type a model name manually",
     "configSource": "Source: openclaw.json",
     "configLoading": "Loading config...",
     "refreshConfig": "Refresh",
@@ -952,6 +959,7 @@
     "searchSessions": "Search sessions...",
     "noResults": "No matching sessions",
     "renamePrompt": "Enter new name:",
+    "renameTitle": "Rename Session",
     "deleteConfirm": "Delete this session? Chat history will be lost.",
     "clearSession": "Clear session",
     "clearConfirmTitle": "Clear \"{{name}}\"?",

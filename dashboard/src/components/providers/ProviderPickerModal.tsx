@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Button, Card, Input, Modal, Space, Typography } from 'antd';
+import { App, Button, Card, Input, Modal, Space, Typography } from 'antd';
 import { ApiOutlined, GlobalOutlined, KeyOutlined, LaptopOutlined, SearchOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { PROVIDER_PRESETS } from '../../utils/provider-presets';
@@ -19,6 +19,22 @@ type ProviderSection = {
   providerIds: ProviderId[];
   groups?: { id: 'cn' | 'global'; title: string; providerIds: ProviderId[] }[];
 };
+
+// Providers we actively recommend/maintain for the current user base (CN undergrads).
+// Selecting anything outside this set surfaces a stability caution before proceeding.
+const RECOMMENDED_PROVIDER_IDS = new Set<string>([
+  'openai',
+  'deepseek',
+  'moonshot',
+  'moonshot-cn',
+  'kimi-coding',
+  'minimax',
+  'minimax-cn',
+  'zai',
+  'zai-global',
+  'zai-coding',
+  'zai-coding-global',
+]);
 
 const LOCAL_PROVIDER_IDS: ProviderId[] = ['ollama', 'vllm'];
 const GATEWAY_PROVIDER_IDS: ProviderId[] = [
@@ -145,7 +161,23 @@ export default function ProviderPickerModal({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const { modal } = App.useApp();
   const [query, setQuery] = useState('');
+
+  const handleSelect = (providerId: string) => {
+    if (RECOMMENDED_PROVIDER_IDS.has(providerId)) {
+      onSelect(providerId);
+      return;
+    }
+    modal.confirm({
+      title: t('providerPicker.unstableWarnTitle'),
+      content: t('providerPicker.unstableWarnBody'),
+      okText: t('providerPicker.unstableWarnContinue'),
+      cancelText: t('common.cancel'),
+      centered: true,
+      onOk: () => onSelect(providerId),
+    });
+  };
 
   const excludeSet = useMemo(() => new Set(excludeProviderIds ?? []), [excludeProviderIds]);
   const includeSet = useMemo(
@@ -196,7 +228,7 @@ export default function ProviderPickerModal({
               key={p.id}
               size="small"
               hoverable
-              onClick={() => onSelect(p.id)}
+              onClick={() => handleSelect(p.id)}
               style={{
                 cursor: 'pointer',
                 border: selected ? '1px solid var(--accent-primary)' : '1px solid var(--border)',
@@ -243,7 +275,7 @@ export default function ProviderPickerModal({
             key={id}
             size="small"
             hoverable
-            onClick={() => onSelect(id)}
+            onClick={() => handleSelect(id)}
             style={{
               cursor: 'pointer',
               border: selected ? '1px solid var(--accent-primary)' : '1px solid var(--border)',

@@ -1,4 +1,8 @@
 {
+  "common": {
+    "ok": "确定",
+    "cancel": "取消"
+  },
   "app": {
     "name": "WentorOS·科研龙虾",
     "tagline": "AI 驱动的学术科研助手"
@@ -90,8 +94,7 @@
     "dropFolderAllFailed": "该文件夹内的文件全部上传失败",
     "dropFolderPartial": "文件夹内有 {{failed}}/{{total}} 个文件上传失败",
     "thinkingLabel": "思考过程",
-    "imageNotSupported": "当前模型不支持图片处理。请在设置中启用独立视觉模型，或切换到支持图片的主模型（如 Claude、GPT-4o）。",
-    "attachNoVisionModel": "已附加图片，但当前模型无法识图。请先在设置中启用独立视觉模型，否则发送后图片会被忽略。",
+    "attachNoVisionModel": "已附加图片。当前模型无法直接识图，图片会存入工作区，助手将尝试用工具（如 OCR、代码）解读；如需稳定识图，建议在设置中启用独立视觉模型。",
     "bgWorking": "正在后台工作...",
     "activityHistory": "活动日志",
     "noActivityYet": "暂无活动",
@@ -152,7 +155,10 @@
     "directGlobal": "Global",
     "selected": "已选",
     "addCustomProfile": "添加自定义 API 配置",
-    "addCustomProfileHint": "与「自定义」相同：在下方填写地址、密钥、模型后保存"
+    "addCustomProfileHint": "与「自定义」相同：在下方填写地址、密钥、模型后保存",
+    "unstableWarnTitle": "请谨慎使用该接口",
+    "unstableWarnBody": "该接口可能会因缺少维护而带来系统不稳定，请谨慎使用。我们推荐您使用 OpenAI、DeepSeek、Kimi、MiniMax、智谱 GLM（API 与 Coding）。",
+    "unstableWarnContinue": "仍然使用"
   },
   "providerVariants": {
     "title": "变体",
@@ -657,6 +663,7 @@
     "aboutDiagnostics": "复制诊断信息",
     "aboutDiagnosticsCopied": "诊断信息已复制到剪贴板",
     "noVisionModel": "与文本模型相同",
+    "noVisionModelHint": "该供应商暂无可选视觉模型,可直接手动输入模型名称",
     "configSource": "配置来源：openclaw.json",
     "configLoading": "加载配置中...",
     "refreshConfig": "刷新",
@@ -952,6 +959,7 @@
     "searchSessions": "搜索会话...",
     "noResults": "无匹配会话",
     "renamePrompt": "输入新名称：",
+    "renameTitle": "重命名会话",
     "deleteConfirm": "删除此会话？聊天记录将丢失。",
     "clearSession": "清空会话",
     "clearConfirmTitle": "清空「{{name}}」？",

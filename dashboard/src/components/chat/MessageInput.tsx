@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Button, Tooltip, message, Modal, Image } from 'antd';
+import { App, Button, Tooltip, message, Image } from 'antd';
 import { SendOutlined, PaperClipOutlined, ReloadOutlined, HistoryOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useChatStore } from '../../stores/chat';
@@ -45,6 +45,7 @@ const WORKSPACE_PATH_MIME = 'text/x-workspace-path';
 
 export default function MessageInput() {
   const { t } = useTranslation();
+  const { modal } = App.useApp();
   const sessionKey = useChatStore((s) => s.sessionKey);
   const [text, setText] = useState(() => {
     try {
@@ -399,7 +400,7 @@ export default function MessageInput() {
       const totalBytes = kept.reduce((sum, d) => sum + d.file.size, 0);
       if (kept.length > MAX_DROP_FILES || totalBytes > MAX_DROP_TOTAL_BYTES) {
         const ok = await new Promise<boolean>((resolve) => {
-          Modal.confirm({
+          modal.confirm({
             title: t('chat.dropBulkTitle', { defaultValue: 'Upload many files?' }),
             content: t('chat.dropBulkContent', {
               count: kept.length,
@@ -407,6 +408,8 @@ export default function MessageInput() {
               defaultValue: 'This drop contains {{count}} files (~{{size}}MB). Upload all of them?',
             }),
             okText: t('chat.dropBulkConfirm', { defaultValue: 'Upload all' }),
+            cancelText: t('common.cancel', 'Cancel'),
+            centered: true,
             onOk: () => resolve(true),
             onCancel: () => resolve(false),
           });
@@ -433,7 +436,7 @@ export default function MessageInput() {
         void ingestFolder(rootName, group);
       }
     },
-    [t, ingestExternalFile, ingestFolder],
+    [modal, t, ingestExternalFile, ingestFolder],
   );
 
   const retryReference = useCallback(
@@ -574,11 +577,12 @@ export default function MessageInput() {
       activeSessionStale
       && staleSendAcknowledgedKey !== sessionKey
     ) {
-      Modal.confirm({
+      modal.confirm({
         title: t('chat.staleSessionConfirmTitle'),
         content: t('chat.staleSessionConfirmBody'),
         okText: t('chat.staleSessionConfirmOk'),
         cancelText: t('chat.staleSessionConfirmCancel'),
+        centered: true,
         onOk: () => {
           acknowledgeStaleSessionSend(sessionKey);
           doSend();
@@ -588,7 +592,7 @@ export default function MessageInput() {
     }
 
     doSend();
-  }, [text, attachments, references, isConnected, sending, send, sessionKey, inputHistory, t]);
+  }, [text, attachments, references, isConnected, sending, send, sessionKey, inputHistory, t, modal]);
 
   const abortShortcut = abortChatShortcutLabel();
   const abortTooltip = t('chat.abortWithShortcut', {

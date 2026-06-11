@@ -5,18 +5,14 @@
  * route them based on MODEL CAPABILITY, not mere config existence:
  *
  *   - Primary model supports vision  → send attachments inline to the model.
- *   - Primary text-only, but imageModel is vision-capable → save to workspace
- *     and route file paths for the agent's /image tool (attachments stripped).
- *   - Primary text-only AND imageModel is NOT vision-capable → BLOCK the send
- *     with chat.imageNotSupported. (Previously this used existence-only
- *     hasImageModelConfigured(), so a text-only model mistakenly set as the
- *     imageModel slipped past the guard and failed late at the /image tool.)
- *
- * Reference guard: research-claw/dashboard/src/stores/chat.ts:911-925
+ *   - Primary text-only (regardless of imageModel) → save to workspace and
+ *     route file paths for the agent's tools (/image, OCR, code); inline
+ *     attachments are stripped. The send is NEVER hard-blocked — the composer
+ *     shows a soft hint instead, so the conversation can still proceed and the
+ *     agent may read the image via its own tooling.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useChatStore } from '../../stores/chat';
-import i18n from '../../i18n';
 import { CLIENT_ATTACHMENT_PNG } from '../../__fixtures__/gateway-payloads/chat-send';
 
 // Controllable capability returns, hoisted above vi.mock factories.
@@ -50,7 +46,7 @@ function findCall(method: string) {
   return mockGatewayClient.request.mock.calls.find((c: unknown[]) => c[0] === method);
 }
 
-describe('Vision-capability send guard parity — chat.ts:911-925', () => {
+describe('Vision-capability routing parity — chat.ts send()', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     caps.primary.value = false;
@@ -70,16 +66,20 @@ describe('Vision-capability send guard parity — chat.ts:911-925', () => {
     });
   });
 
-  it('text-only primary + text-only imageModel: BLOCKS send, no chat.send, sets lastError', async () => {
+  it('text-only primary + text-only imageModel: no block — saves to workspace, routes paths, strips inline attachments', async () => {
     caps.primary.value = false;
     caps.image.value = false;
 
     await useChatStore.getState().send('look at this', [CLIENT_ATTACHMENT_PNG]);
 
-    expect(findCall('chat.send')).toBeUndefined();
-    expect(findCall('rc.ws.saveImage')).toBeUndefined();
-    expect(useChatStore.getState().lastError).toBe(i18n.t('chat.imageNotSupported'));
-    expect(useChatStore.getState().sending).toBe(false);
+    // Send is NOT blocked: image saved to workspace, path marker embedded,
+    // inline attachments stripped (text-only primary), no error surfaced.
+    expect(findCall('rc.ws.saveImage')).toBeDefined();
+    const chatSend = findCall('chat.send');
+    expect(chatSend).toBeDefined();
+    expect((chatSend![1] as { attachments?: unknown }).attachments).toBeUndefined();
+    expect((chatSend![1] as { message: string }).message).toContain('[rc-image:');
+    expect(useChatStore.getState().lastError).toBeNull();
   });
 
   it('text-only primary + vision-capable imageModel: PASSES, routes to workspace, strips inline attachments', async () => {

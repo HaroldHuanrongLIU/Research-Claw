@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { App, Button, Dropdown, Modal, Spin, Typography, Upload } from 'antd';
+import { App, Button, Dropdown, Spin, Typography, Upload } from 'antd';
 import type { MenuProps } from 'antd';
 import {
   FileOutlined,
@@ -355,7 +355,7 @@ interface FileTreeNodeProps {
 
 function FileTreeNode({ node, depth, tokens, workspaceRoot, dragSrcPath, movingPath, creatingItem, onOpenFile, onDeleted, onMoved, onDragSrcChange, onMoveStart, onMoveEnd, onCreateItem, onCreateDone }: FileTreeNodeProps) {
   const { t } = useTranslation();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const client = useGatewayStore((s) => s.client);
   const [expanded, setExpanded] = useState(
     depth === 0 && ROOT_PRIORITY_ORDER.includes(node.name as (typeof ROOT_PRIORITY_ORDER)[number]),
@@ -464,12 +464,13 @@ function FileTreeNode({ node, depth, tokens, workspaceRoot, dragSrcPath, movingP
         label: t('workspace.contextMenu.delete'),
         danger: true,
         onClick: () => {
-          Modal.confirm({
+          modal.confirm({
             title: t('workspace.contextMenu.deleteConfirmTitle'),
             content: node.path,
             okText: t('workspace.contextMenu.deleteOk'),
             cancelText: t('workspace.contextMenu.deleteCancel'),
             okButtonProps: { danger: true },
+            centered: true,
             onOk: async () => {
               try {
                 await client?.request('rc.ws.delete', { path: node.path });
@@ -485,7 +486,7 @@ function FileTreeNode({ node, depth, tokens, workspaceRoot, dragSrcPath, movingP
     );
 
     return items;
-  }, [node.path, node.type, t, client, workspaceRoot, onDeleted, message, onCreateItem]);
+  }, [node.path, node.type, t, client, workspaceRoot, onDeleted, message, modal, onCreateItem]);
 
   // --- Drag source: lightweight custom ghost image ---
   const handleDragStart = useCallback((e: React.DragEvent) => {
@@ -883,7 +884,7 @@ function RecentChanges({ commits, tokens, hasMore, onLoadMore, loadingMore }: {
 
 export default function WorkspacePanel() {
   const { t } = useTranslation();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const configTheme = useConfigStore((s) => s.theme);
   const tokens = useMemo(() => getThemeTokens(configTheme), [configTheme]);
   const client = useGatewayStore((s) => s.client);
@@ -1291,7 +1292,7 @@ export default function WorkspacePanel() {
       const totalBytes = kept.reduce((sum, d) => sum + d.file.size, 0);
       if (kept.length > MAX_DROP_FILES || totalBytes > MAX_DROP_TOTAL_BYTES) {
         const ok = await new Promise<boolean>((resolve) => {
-          Modal.confirm({
+          modal.confirm({
             title: t('workspace.uploadBulkTitle', { defaultValue: 'Upload many files?' }),
             content: t('workspace.uploadBulkContent', {
               count: kept.length,
@@ -1299,6 +1300,8 @@ export default function WorkspacePanel() {
               defaultValue: `This drop contains ${kept.length} files (~${Math.round(totalBytes / (1024 * 1024))}MB). Upload all of them?`,
             }),
             okText: t('workspace.uploadBulkConfirm', { defaultValue: 'Upload all' }),
+            cancelText: t('common.cancel', 'Cancel'),
+            centered: true,
             onOk: () => resolve(true),
             onCancel: () => resolve(false),
           });
@@ -1342,7 +1345,7 @@ export default function WorkspacePanel() {
         setUploading(false);
       }
     },
-    [uploading, loadData, t, message],
+    [uploading, loadData, t, message, modal],
   );
 
   const handlePanelDrop = useCallback((e: React.DragEvent) => {

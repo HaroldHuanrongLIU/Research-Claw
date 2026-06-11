@@ -9,7 +9,7 @@ import { useSessionsStore } from './sessions';
 import { useCronStore } from './cron';
 import { useMonitorStore } from './monitor';
 import { useUiStore } from './ui';
-import { primaryModelSupportsVision, imageModelSupportsVision, useConfigStore } from './config';
+import { primaryModelSupportsVision, useConfigStore } from './config';
 import { syncSystemPromptAppendToGateway } from '../utils/sync-system-prompt-append';
 import { appendReferenceBlock, dedupePaths, isImagePath } from '../utils/file-reference';
 import i18n from '../i18n';
@@ -924,21 +924,10 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       let finalAttachments = rpcAttachments;
       const visionCapable = primaryModelSupportsVision();
 
-      // Scenario 3 guard: text-only primary AND no vision-capable imageModel.
-      // The gateway would silently drop attachments AND the /image tool would
-      // fail late with "Model does not support images". Block the send with a
-      // clear error instead. Capability is checked (not mere existence) so a
-      // text-only model mistakenly set as imageModel is correctly caught here.
-      if (rpcAttachments?.length && !visionCapable && !imageModelSupportsVision()) {
-        set((s) => ({
-          ...clearActiveRunState(),
-          ...(buildAbortInputRestorePatch(s, localRunId) ?? { _pendingUserMsgs: [] }),
-          sending: false,
-          lastError: i18n.t('chat.imageNotSupported'),
-        }));
-        useTaskFlowStore.getState().endRun(localRunId, 'error');
-        return;
-      }
+      // No hard block on images: even without an inline-vision model, the image
+      // is saved to the workspace and its path is handed to the agent, which may
+      // still read it via tools (/image, OCR, code). The composer shows a soft
+      // hint instead — never an interrupting block.
 
       if (rpcAttachments?.length) {
         const savedPaths: string[] = [];
