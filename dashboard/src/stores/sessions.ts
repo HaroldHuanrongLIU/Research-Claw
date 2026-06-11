@@ -48,6 +48,8 @@ interface SessionsState {
   deleteSession: (key: string) => Promise<void>;
   /** Reset a session in place (fresh transcript, same key) — the only safe "clear" for main. */
   clearSession: (key: string) => Promise<void>;
+  /** Auto-name a default-labelled session from its first exchange (at most once). */
+  autoNameSession: (key: string) => Promise<void>;
   renameSession: (key: string, label: string) => Promise<void>;
   /** General-purpose session patch (aligned with OC sessions.patch — supports all fields). */
   patchSession: (key: string, fields: SessionPatchFields) => Promise<void>;
@@ -79,7 +81,21 @@ import {
   normalizeSessionKey,
 } from '../utils/session-key';
 import { isSessionRowStale } from '../utils/session-freshness';
+import { isAutoNameCandidate, extractFirstExchange, type HistoryMessage } from '../utils/auto-name';
 import { useConfigStore } from './config';
+
+/**
+ * Sessions already auto-named (or naming in-flight) this dashboard lifetime.
+ * Added before the await chain to dedupe concurrent triggers; removed on
+ * failure / incomplete exchange so a later run can retry. Kept on success —
+ * a session is named at most once (user rename then wins forever).
+ */
+const autoNameGuard = new Set<string>();
+
+/** Test-only: reset the auto-name guard between test cases. */
+export function _resetAutoNameGuard(): void {
+  autoNameGuard.clear();
+}
 
 /** Check if a key refers to the main session (handles both bare and canonical forms). */
 function isMain(key: string): boolean {
@@ -232,6 +248,45 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
     }
     // Re-fetch the list: reset changes sessionId/updatedAt and clears the derived title.
     await get().loadSessions();
+  },
+
+  autoNameSession: async (key: string) => {
+    const client = useGatewayStore.getState().client;
+    if (!client?.isConnected) return;
+    const row = findSessionRow(get().sessions, key);
+    if (!isAutoNameCandidate({ key, label: row?.label })) return;
+    const guardKey = normalizeSessionKey(key);
+    if (autoNameGuard.has(guardKey)) return;
+    autoNameGuard.add(guardKey);
+    try {
+      const history = await client.request<{ messages: HistoryMessage[] }>('chat.history', {
+        sessionKey: key,
+        limit: 12,
+      });
+      const exchange = extractFirstExchange(history.messages ?? []);
+      if (!exchange) {
+        autoNameGuard.delete(guardKey); // exchange incomplete — retry on a later run
+        return;
+      }
+      const result = await client.request<{ ok?: boolean; title?: string }>('rc.session.autoName', {
+        key,
+        userText: exchange.userText,
+        assistantText: exchange.assistantText,
+      });
+      const title = typeof result?.title === 'string' ? result.title.trim() : '';
+      if (!result?.ok || !title) {
+        autoNameGuard.delete(guardKey);
+        return;
+      }
+      await client.request('sessions.patch', { key, label: title });
+      set((s) => ({
+        sessions: s.sessions.map((sess) =>
+          normalizeSessionKey(sess.key) === guardKey ? { ...sess, label: title } : sess,
+        ),
+      }));
+    } catch {
+      autoNameGuard.delete(guardKey); // naming failed — allow retry
+    }
   },
 
   renameSession: async (key: string, label: string) => {

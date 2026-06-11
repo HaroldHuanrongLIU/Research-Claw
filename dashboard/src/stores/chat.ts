@@ -1333,6 +1333,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
               useUiStore.getState().triggerWorkspaceRefresh();
               useUiStore.getState().checkNotifications();
               get().loadSessionUsage();
+              void useSessionsStore.getState().autoNameSession(get().sessionKey);
             }, 500);
           }
           return;
@@ -1376,6 +1377,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             useUiStore.getState().checkNotifications();
             // Refresh token usage from gateway transcript
             get().loadSessionUsage();
+            void useSessionsStore.getState().autoNameSession(get().sessionKey);
           }, 500);
 
           // Channel B: extract notifications from card types in assistant message
@@ -1430,6 +1432,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
               useUiStore.getState().triggerWorkspaceRefresh();
               useUiStore.getState().checkNotifications();
               get().loadSessionUsage();
+              void useSessionsStore.getState().autoNameSession(get().sessionKey);
             }, 500);
           }
 

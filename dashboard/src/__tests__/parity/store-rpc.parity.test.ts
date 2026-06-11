@@ -16,7 +16,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useLibraryStore } from '../../stores/library';
 import { useTasksStore } from '../../stores/tasks';
-import { useSessionsStore } from '../../stores/sessions';
+import { useSessionsStore, _resetAutoNameGuard } from '../../stores/sessions';
 
 import {
   RC_LIT_LIST_RESPONSE,
@@ -33,6 +33,9 @@ import {
   SESSIONS_DELETE_RESPONSE,
   SESSIONS_PATCH_RESPONSE,
   SESSIONS_RESET_RESPONSE,
+  CHAT_HISTORY_FIRST_EXCHANGE_RESPONSE,
+  CHAT_HISTORY_NO_REPLY_RESPONSE,
+  RC_SESSION_AUTONAME_RESPONSE,
 } from '../../__fixtures__/gateway-payloads/rpc-responses';
 
 // ── Mock gateway store ──────────────────────────────────────────────────
@@ -719,6 +722,7 @@ describe('Sessions store RPC parity (sessions.*)', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockGatewayClient.isConnected = true;
+    _resetAutoNameGuard();
     useSessionsStore.setState({
       sessions: [],
       activeSessionKey: 'main',
@@ -908,6 +912,134 @@ describe('Sessions store RPC parity (sessions.*)', () => {
 
       // Should still be removed from local state
       expect(useSessionsStore.getState().sessions).toHaveLength(2);
+    });
+  });
+
+  describe('autoNameSession → chat.history + rc.session.autoName + sessions.patch', () => {
+    const CANDIDATE_KEY = 'agent:main:project-e5f6g7h8'; // no label in SESSIONS_LIST_RESPONSE
+
+    function seedSessions() {
+      useSessionsStore.setState({
+        sessions: SESSIONS_LIST_RESPONSE.sessions,
+        activeSessionKey: 'main',
+      });
+    }
+
+    it('names a default-labelled session: history → autoName → patch, with sanitized user text', async () => {
+      seedSessions();
+      mockGatewayClient.request
+        .mockResolvedValueOnce(CHAT_HISTORY_FIRST_EXCHANGE_RESPONSE)
+        .mockResolvedValueOnce(RC_SESSION_AUTONAME_RESPONSE)
+        .mockResolvedValueOnce({ ok: true });
+
+      await useSessionsStore.getState().autoNameSession(CANDIDATE_KEY);
+
+      expect(mockGatewayClient.request).toHaveBeenNthCalledWith(
+        1,
+        'chat.history',
+        { sessionKey: CANDIDATE_KEY, limit: 12 },
+      );
+      // The [Research-Claw] context block must be stripped before naming
+      expect(mockGatewayClient.request).toHaveBeenNthCalledWith(
+        2,
+        'rc.session.autoName',
+        {
+          key: CANDIDATE_KEY,
+          userText: '请帮我整理 Transformer 注意力机制的代表性论文',
+          assistantText: expect.stringContaining('Attention Is All You Need'),
+        },
+      );
+      expect(mockGatewayClient.request).toHaveBeenNthCalledWith(
+        3,
+        'sessions.patch',
+        { key: CANDIDATE_KEY, label: RC_SESSION_AUTONAME_RESPONSE.title },
+      );
+      const row = useSessionsStore.getState().sessions.find((s) => s.key === CANDIDATE_KEY);
+      expect(row?.label).toBe(RC_SESSION_AUTONAME_RESPONSE.title);
+    });
+
+    it('does nothing for main, user-renamed, and cron sessions', async () => {
+      seedSessions();
+
+      await useSessionsStore.getState().autoNameSession('agent:main:main');
+      await useSessionsStore.getState().autoNameSession('agent:main:project-a1b2c3d4'); // label: 'Literature Review Sprint'
+      await useSessionsStore.getState().autoNameSession('agent:main:cron:ab79d459-5135-4236-bd6f-4d234172a9c8');
+
+      expect(mockGatewayClient.request).not.toHaveBeenCalled();
+    });
+
+    it('waits when the first exchange has no assistant reply yet (retry allowed)', async () => {
+      seedSessions();
+      mockGatewayClient.request.mockResolvedValue(CHAT_HISTORY_NO_REPLY_RESPONSE);
+
+      await useSessionsStore.getState().autoNameSession(CANDIDATE_KEY);
+      await useSessionsStore.getState().autoNameSession(CANDIDATE_KEY);
+
+      // Only chat.history calls, never rc.session.autoName — and not blocked after first try
+      expect(mockGatewayClient.request).toHaveBeenCalledTimes(2);
+      expect(mockGatewayClient.request).toHaveBeenCalledWith(
+        'chat.history',
+        { sessionKey: CANDIDATE_KEY, limit: 12 },
+      );
+    });
+
+    it('does not patch when the naming RPC fails, and allows retry', async () => {
+      seedSessions();
+      mockGatewayClient.request
+        .mockResolvedValueOnce(CHAT_HISTORY_FIRST_EXCHANGE_RESPONSE)
+        .mockRejectedValueOnce(new Error('PLUGIN_ERROR'))
+        .mockResolvedValueOnce(CHAT_HISTORY_FIRST_EXCHANGE_RESPONSE)
+        .mockResolvedValueOnce(RC_SESSION_AUTONAME_RESPONSE)
+        .mockResolvedValueOnce({ ok: true });
+
+      await useSessionsStore.getState().autoNameSession(CANDIDATE_KEY);
+      const callsAfterFailure = mockGatewayClient.request.mock.calls.length;
+      expect(callsAfterFailure).toBe(2); // history + failed autoName, no patch
+
+      await useSessionsStore.getState().autoNameSession(CANDIDATE_KEY);
+      expect(mockGatewayClient.request).toHaveBeenCalledWith(
+        'sessions.patch',
+        { key: CANDIDATE_KEY, label: RC_SESSION_AUTONAME_RESPONSE.title },
+      );
+    });
+
+    it('names only once: after success further calls are no-ops', async () => {
+      seedSessions();
+      mockGatewayClient.request
+        .mockResolvedValueOnce(CHAT_HISTORY_FIRST_EXCHANGE_RESPONSE)
+        .mockResolvedValueOnce(RC_SESSION_AUTONAME_RESPONSE)
+        .mockResolvedValueOnce({ ok: true });
+
+      await useSessionsStore.getState().autoNameSession(CANDIDATE_KEY);
+      await useSessionsStore.getState().autoNameSession(CANDIDATE_KEY);
+
+      expect(mockGatewayClient.request).toHaveBeenCalledTimes(3);
+    });
+
+    it('dedupes concurrent calls for the same session', async () => {
+      seedSessions();
+      mockGatewayClient.request
+        .mockResolvedValueOnce(CHAT_HISTORY_FIRST_EXCHANGE_RESPONSE)
+        .mockResolvedValueOnce(RC_SESSION_AUTONAME_RESPONSE)
+        .mockResolvedValueOnce({ ok: true });
+
+      await Promise.all([
+        useSessionsStore.getState().autoNameSession(CANDIDATE_KEY),
+        useSessionsStore.getState().autoNameSession(CANDIDATE_KEY),
+      ]);
+
+      expect(mockGatewayClient.request).toHaveBeenCalledTimes(3);
+    });
+
+    it('ignores an empty title from the naming RPC', async () => {
+      seedSessions();
+      mockGatewayClient.request
+        .mockResolvedValueOnce(CHAT_HISTORY_FIRST_EXCHANGE_RESPONSE)
+        .mockResolvedValueOnce({ ok: true, title: '   ' });
+
+      await useSessionsStore.getState().autoNameSession(CANDIDATE_KEY);
+
+      expect(mockGatewayClient.request).toHaveBeenCalledTimes(2); // no sessions.patch
     });
   });
 

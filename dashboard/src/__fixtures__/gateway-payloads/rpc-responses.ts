@@ -497,3 +497,54 @@ export const RC_TASK_LIST_EMPTY_RESPONSE = {
 export const SESSIONS_LIST_EMPTY_RESPONSE = {
   sessions: [],
 };
+
+// ── chat.history first-exchange responses (for session auto-naming) ──────
+// Source: OC gateway chat.history returns { messages: [{ role, content, timestamp }] }.
+// User messages in real transcripts carry RC-injected context blocks
+// ([Research-Claw] header + indented "  - " continuation lines) that
+// sanitizeUserMessage() must strip before the text is used for naming.
+
+export const CHAT_HISTORY_FIRST_EXCHANGE_RESPONSE = {
+  messages: [
+    {
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: '[Research-Claw] Library: 12 papers (3 unread)\n  - Monitor: 2 active\n请帮我整理 Transformer 注意力机制的代表性论文',
+        },
+      ],
+      timestamp: 1781190100000,
+    },
+    {
+      role: 'assistant',
+      content: [
+        {
+          type: 'text',
+          text: '好的，我来整理 Transformer 注意力机制的代表性论文。可以从 Attention Is All You Need 开始，按自注意力、稀疏注意力、线性注意力三条线梳理……',
+        },
+      ],
+      timestamp: 1781190160000,
+    },
+  ],
+};
+
+// chat.history where the first user turn has no assistant reply yet
+// (run still streaming or aborted) — auto-naming must wait.
+export const CHAT_HISTORY_NO_REPLY_RESPONSE = {
+  messages: [
+    {
+      role: 'user',
+      content: [{ type: 'text', text: '请帮我整理 Transformer 注意力机制的代表性论文' }],
+      timestamp: 1781190100000,
+    },
+  ],
+};
+
+// ── rc.session.autoName response ─────────────────────────────────────────
+// Source: research-claw-core src/session-naming/rpc.ts — returns { ok, title }.
+
+export const RC_SESSION_AUTONAME_RESPONSE = {
+  ok: true,
+  title: '注意力机制论文整理',
+};

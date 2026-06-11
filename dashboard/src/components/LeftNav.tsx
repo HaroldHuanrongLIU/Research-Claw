@@ -50,6 +50,11 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'settings', icon: <SettingOutlined />, labelKey: 'nav.settings' },
 ];
 
+/** Last-activity timestamp for the hover tooltip (titles no longer encode time). */
+function sessionTimestamp(session: { lastInteractionAt?: number; updatedAt?: number }): number | undefined {
+  return session.lastInteractionAt ?? session.updatedAt;
+}
+
 /** Get display name for a session. Prefers label > derivedTitle > short key. */
 function getSessionName(session: { key: string; label?: string; derivedTitle?: string; displayName?: string }, t: (k: string) => string): string {
   if (session.label) return session.label;
@@ -254,17 +259,25 @@ export default function LeftNav() {
                   background: isActive ? 'var(--accent-primary)' : 'var(--text-tertiary)',
                 }}
               />
-              <span style={{
-                flex: 1,
-                fontWeight: isActive ? 600 : 400,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                fontSize: 13,
-                color: 'var(--text-primary)',
-              }}>
-                {name}
-              </span>
+              <Tooltip
+                title={sessionTimestamp(session)
+                  ? `${t('project.lastActive')}: ${new Date(sessionTimestamp(session)!).toLocaleString()}`
+                  : undefined}
+                placement="right"
+                mouseEnterDelay={0.4}
+              >
+                <span style={{
+                  flex: 1,
+                  fontWeight: isActive ? 600 : 400,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  fontSize: 13,
+                  color: 'var(--text-primary)',
+                }}>
+                  {name}
+                </span>
+              </Tooltip>
               <EditOutlined
                 style={{ fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 0 }}
                 onClick={(e) => { e.stopPropagation(); handleRename(session.key, name); }}

@@ -933,6 +933,7 @@
     "clearSession": "清空会话",
     "clearConfirmTitle": "清空「{{name}}」？",
     "clearConfirmContent": "会话将重新开始：聊天记录被清空，名称、模型等设置保留。旧记录文件仍保存在磁盘上，但无法在界面中查看。",
+    "lastActive": "最近活动",
     "sessionHelpTitle": "什么是会话？",
     "sessionHelp": "每个会话是一条独立的对话线程，拥有各自的聊天记录。不同会话之间完全并行、互不阻塞。你可以同时开多个会话，分别处理不同的科研任务。"
   },

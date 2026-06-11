@@ -37,6 +37,8 @@ import { registerMonitorRpc } from './src/monitor/rpc.js';
 import { createMonitorTools } from './src/monitor/tools.js';
 import { PptService } from './src/ppt/service.js';
 import { registerPptRpc } from './src/ppt/rpc.js';
+import { registerSessionNamingRpc } from './src/session-naming/rpc.js';
+import { SessionNamingService } from './src/session-naming/service.js';
 import { createPptTools } from './src/ppt/tools.js';
 import type { RegisterMethod } from './src/types.js';
 import { initSkillIndex, searchSkills, readSkillContent, getSkillCatalogSummary } from './src/skills/search.js';
@@ -1123,7 +1125,7 @@ const plugin: PluginDefinition = {
     }
     } // end if (!_registrationDone) — tools only
 
-    // ── 5. Register RPC methods (78 WS total) ────────────────────────
+    // ── 5. Register RPC methods (79 WS total) ────────────────────────
     // NOTE: RPC + HTTP routes MUST be registered on EVERY register() call.
     // OC calls register() twice: discovery pass (tools only) and gateway pass
     // (where registerGatewayMethod actually wires up the WS handler).
@@ -1161,6 +1163,7 @@ const plugin: PluginDefinition = {
     registerMonitorRpc(registerMethod, monitorService);   // 12 methods
     registerPaperReviewRpc(registerMethod, reviewService); // 6 methods
     registerPptRpc(registerMethod, pptService);           // 3 methods
+    registerSessionNamingRpc(registerMethod, new SessionNamingService()); // 1 method
     registerProviderRpc(registerMethod, {
       config: api.runtime.config,
       logger: api.logger,
