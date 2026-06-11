@@ -378,10 +378,72 @@ export const SESSIONS_LIST_RESPONSE = {
   ],
 };
 
+// ── sessions.list response with synthetic sessions ──────────────────────
+// Source: OpenClaw session stores include synthetic rows the dashboard must hide:
+//   - isolated heartbeat runs:  "agent:main:main:heartbeat" (heartbeat-runner.ts isolatedSession)
+//   - subagent runs:            "agent:main:subagent:<uuid>" (sessions_spawn)
+// Keys observed in a real ~/.openclaw/agents/main/sessions/sessions.json store.
+
+export const SESSIONS_LIST_WITH_SYNTHETIC_RESPONSE = {
+  sessions: [
+    {
+      key: 'agent:main:main',
+      displayName: 'Main',
+      updatedAt: 1781104748782,
+      sessionId: 'd3f3cd82-c5c1-4d9f-9b89-e163305365ac',
+      kind: 'agent',
+    },
+    {
+      key: 'agent:main:main:heartbeat',
+      derivedTitle: 'Read HEARTBEAT.md if it exists (workspace context). Follow…',
+      updatedAt: 1781143226567,
+      sessionId: 'e49a46e7-45c5-46c0-bb6a-2e210744a600',
+      kind: 'agent',
+    },
+    {
+      key: 'agent:main:subagent:5e8e783e-086f-4f5c-93b6-ba24cd42be93',
+      derivedTitle: '[Wed 2026-06-10 23:30 GMT+8] [Subagent Context] You are…',
+      updatedAt: 1781105453731,
+      sessionId: '21c02d34-0094-4830-9102-3bb736e3bf7c',
+      kind: 'agent',
+    },
+    {
+      key: 'agent:main:project-b76fccff',
+      label: 'Session 1',
+      updatedAt: 1780988430800,
+      sessionId: 'b321cc60-41af-48f6-b464-7d380a2d744a',
+      kind: 'agent',
+    },
+  ],
+};
+
 // ── sessions.delete response ─────────────────────────────────────────────
 // Source: OpenClaw gateway sessions.delete → returns { ok: true }
 
 export const SESSIONS_DELETE_RESPONSE = { ok: true };
+
+// ── sessions.reset response ──────────────────────────────────────────────
+// Source: OpenClaw gateway server-methods/sessions.ts:2362
+//   respond(true, { ok: true, key: result.key, entry: result.entry })
+// entry: session-reset-service.ts performGatewaySessionReset — fresh sessionId +
+// empty transcript; label/displayName/model prefs/delivery context preserved.
+// Params schema (gateway-protocol/src/schema/sessions.ts:250):
+//   { key, agentId?, reason?: "new"|"reset" } with additionalProperties: false.
+
+export const SESSIONS_RESET_RESPONSE = {
+  ok: true,
+  key: 'agent:main:main',
+  entry: {
+    sessionId: 'f0e1d2c3-0000-4000-8000-9abcdef01234',
+    sessionFile: '/Users/user/.openclaw/agents/main/sessions/f0e1d2c3-0000-4000-8000-9abcdef01234.jsonl',
+    updatedAt: 1781190000000,
+    systemSent: false,
+    abortedLastRun: false,
+    model: 'deepseek-v4-pro',
+    modelProvider: 'deepseek',
+    displayName: 'Main',
+  },
+};
 
 // ── sessions.patch response ──────────────────────────────────────────────
 // Source: OpenClaw gateway sessions.patch → returns { ok: true, key: string }

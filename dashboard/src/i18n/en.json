@@ -930,6 +930,9 @@
     "noResults": "No matching sessions",
     "renamePrompt": "Enter new name:",
     "deleteConfirm": "Delete this session? Chat history will be lost.",
+    "clearSession": "Clear session",
+    "clearConfirmTitle": "Clear \"{{name}}\"?",
+    "clearConfirmContent": "The session will start fresh: chat history is cleared while the name, model and other settings are kept. The old transcript file stays on disk but is no longer viewable in the UI.",
     "sessionHelpTitle": "What is a Session?",
     "sessionHelp": "Each session is an independent conversation thread with its own history. Different sessions run in parallel without blocking each other. Use multiple sessions to work on different tasks simultaneously."
   },

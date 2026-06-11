@@ -44,6 +44,16 @@ export function isHeartbeatSessionKey(key: string): boolean {
   return rest === 'heartbeat' || rest.endsWith(':heartbeat') || rest.includes(':heartbeat:');
 }
 
+/**
+ * Check if a key refers to a synthetic subagent session (e.g. "subagent:<uuid>").
+ * Subagent runs spawn "agent:<agentId>:subagent:<uuid>" sessions that should not
+ * appear in the user-facing session list.
+ */
+export function isSubagentSessionKey(key: string): boolean {
+  const rest = normalizeSessionKey(key);
+  return rest === 'subagent' || rest.startsWith('subagent:');
+}
+
 /** Bare dashboard key → gateway session store key (agent:main:…). */
 export function toGatewaySessionKey(key: string): string {
   if (!key) return 'agent:main:main';

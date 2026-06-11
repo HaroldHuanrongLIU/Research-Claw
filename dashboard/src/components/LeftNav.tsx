@@ -13,6 +13,7 @@ import {
   MenuUnfoldOutlined,
   AppstoreOutlined,
   PlusOutlined,
+  ClearOutlined,
   DeleteOutlined,
   EditOutlined,
   SearchOutlined,
@@ -77,6 +78,7 @@ export default function LeftNav() {
   const switchSession = useSessionsStore((s) => s.switchSession);
   const createSession = useSessionsStore((s) => s.createSession);
   const deleteSession = useSessionsStore((s) => s.deleteSession);
+  const clearSession = useSessionsStore((s) => s.clearSession);
   const renameSession = useSessionsStore((s) => s.renameSession);
   const isMainSession = useSessionsStore((s) => s.isMainSession);
 
@@ -106,6 +108,19 @@ export default function LeftNav() {
       deleteSession(key);
     }
   };
+
+  const handleClearSession = useCallback((key: string, name: string) => {
+    Modal.confirm({
+      title: t('project.clearConfirmTitle', { name }),
+      content: t('project.clearConfirmContent'),
+      okText: t('common.ok', 'OK'),
+      okButtonProps: { danger: true },
+      cancelText: t('common.cancel', 'Cancel'),
+      onOk: async () => {
+        await clearSession(key);
+      },
+    });
+  }, [t, clearSession]);
 
   const handleDeleteCronSession = useCallback((key: string) => {
     Modal.confirm({
@@ -254,7 +269,14 @@ export default function LeftNav() {
                 style={{ fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 0 }}
                 onClick={(e) => { e.stopPropagation(); handleRename(session.key, name); }}
               />
-              {!isMain && (
+              {isMain ? (
+                <Tooltip title={t('project.clearSession')}>
+                  <ClearOutlined
+                    style={{ fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 0 }}
+                    onClick={(e) => { e.stopPropagation(); handleClearSession(session.key, name); }}
+                  />
+                </Tooltip>
+              ) : (
                 <DeleteOutlined
                   style={{ fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 0 }}
                   onClick={(e) => { e.stopPropagation(); handleDelete(session.key); }}
@@ -356,7 +378,7 @@ export default function LeftNav() {
       </div>
     </div>
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ), [filteredSessions, filteredCronSessions, cronFolded, activeSessionKey, sessionSearch, t, handleDeleteCronSession]);
+  ), [filteredSessions, filteredCronSessions, cronFolded, activeSessionKey, sessionSearch, t, handleDeleteCronSession, handleClearSession]);
 
   const activeSessionLabel = useMemo(() => {
     const session = sessions.find((s) => s.key === activeSessionKey);

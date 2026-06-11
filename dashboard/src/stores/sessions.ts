@@ -46,6 +46,8 @@ interface SessionsState {
   switchSession: (key: string) => void;
   createSession: () => Promise<string>;
   deleteSession: (key: string) => Promise<void>;
+  /** Reset a session in place (fresh transcript, same key) — the only safe "clear" for main. */
+  clearSession: (key: string) => Promise<void>;
   renameSession: (key: string, label: string) => Promise<void>;
   /** General-purpose session patch (aligned with OC sessions.patch — supports all fields). */
   patchSession: (key: string, fields: SessionPatchFields) => Promise<void>;
@@ -70,7 +72,12 @@ function persistKey(key: string) {
   }
 }
 
-import { isHeartbeatSessionKey, isMainSessionKey, normalizeSessionKey } from '../utils/session-key';
+import {
+  isHeartbeatSessionKey,
+  isMainSessionKey,
+  isSubagentSessionKey,
+  normalizeSessionKey,
+} from '../utils/session-key';
 import { isSessionRowStale } from '../utils/session-freshness';
 import { useConfigStore } from './config';
 
@@ -107,8 +114,11 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
         includeDerivedTitles: true,
         limit: 1000,
       });
-      // Drop synthetic heartbeat sessions (isolatedSession runs in "<base>:heartbeat").
-      const serverSessions = (result.sessions ?? []).filter((s) => !isHeartbeatSessionKey(s.key));
+      // Drop synthetic sessions: heartbeat (isolatedSession runs in "<base>:heartbeat")
+      // and subagent runs ("agent:main:subagent:<uuid>").
+      const serverSessions = (result.sessions ?? []).filter(
+        (s) => !isHeartbeatSessionKey(s.key) && !isSubagentSessionKey(s.key),
+      );
       // Ensure the main session is always present in the list
       const sessions = serverSessions.some((s) => isMain(s.key))
         ? serverSessions
@@ -203,6 +213,25 @@ export const useSessionsStore = create<SessionsState>()((set, get) => ({
       useChatStore.getState().loadHistory();
       useChatStore.getState().loadSessionUsage();
     }
+  },
+
+  clearSession: async (key: string) => {
+    const client = useGatewayStore.getState().client;
+    if (!client?.isConnected) return;
+    try {
+      // SessionsResetParamsSchema is { key, agentId?, reason? } with
+      // additionalProperties: false — send exactly { key }.
+      await client.request('sessions.reset', { key });
+    } catch {
+      return; // Reset failed — keep local state untouched
+    }
+    const isActive = normalizeSessionKey(get().activeSessionKey) === normalizeSessionKey(key);
+    if (isActive) {
+      useChatStore.getState().loadHistory();
+      useChatStore.getState().loadSessionUsage();
+    }
+    // Re-fetch the list: reset changes sessionId/updatedAt and clears the derived title.
+    await get().loadSessions();
   },
 
   renameSession: async (key: string, label: string) => {

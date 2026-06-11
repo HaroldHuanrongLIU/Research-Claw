@@ -29,8 +29,10 @@ import {
   RC_TASK_LIST_EMPTY_RESPONSE,
   SESSIONS_LIST_RESPONSE,
   SESSIONS_LIST_EMPTY_RESPONSE,
+  SESSIONS_LIST_WITH_SYNTHETIC_RESPONSE,
   SESSIONS_DELETE_RESPONSE,
   SESSIONS_PATCH_RESPONSE,
+  SESSIONS_RESET_RESPONSE,
 } from '../../__fixtures__/gateway-payloads/rpc-responses';
 
 // ── Mock gateway store ──────────────────────────────────────────────────
@@ -783,6 +785,18 @@ describe('Sessions store RPC parity (sessions.*)', () => {
 
       expect(useSessionsStore.getState().sessions).toEqual([{ key: 'main' }]);
     });
+
+    it('hides synthetic heartbeat and subagent sessions from the list', async () => {
+      // Heartbeat: isolatedSession runs in "<base>:heartbeat" (OC heartbeat-runner.ts).
+      // Subagent: sessions_spawn runs in "agent:<id>:subagent:<uuid>".
+      // Both are machine-driven transcripts that must never appear as user sessions.
+      mockGatewayClient.request.mockResolvedValueOnce(SESSIONS_LIST_WITH_SYNTHETIC_RESPONSE);
+
+      await useSessionsStore.getState().loadSessions();
+
+      const keys = useSessionsStore.getState().sessions.map((s) => s.key);
+      expect(keys).toEqual(['agent:main:main', 'agent:main:project-b76fccff']);
+    });
   });
 
   describe('createSession', () => {
@@ -894,6 +908,104 @@ describe('Sessions store RPC parity (sessions.*)', () => {
 
       // Should still be removed from local state
       expect(useSessionsStore.getState().sessions).toHaveLength(2);
+    });
+  });
+
+  describe('clearSession → sessions.reset', () => {
+    it('sends sessions.reset with exactly { key } — schema forbids extra props', async () => {
+      // Source: OC gateway-protocol/src/schema/sessions.ts:250 SessionsResetParamsSchema
+      //   { key, agentId?, reason? } with additionalProperties: false — any extra
+      //   field (e.g. deleteTranscript) is rejected by assertValidParams.
+      mockGatewayClient.request
+        .mockResolvedValueOnce(SESSIONS_RESET_RESPONSE)
+        .mockResolvedValueOnce(SESSIONS_LIST_RESPONSE);
+
+      await useSessionsStore.getState().clearSession('agent:main:main');
+
+      expect(mockGatewayClient.request).toHaveBeenCalledWith(
+        'sessions.reset',
+        { key: 'agent:main:main' },
+      );
+    });
+
+    it('allows clearing the main session (unlike deleteSession)', async () => {
+      // sessions.reset keeps the key alive with a fresh sessionId/transcript
+      // (OC session-reset-service.ts performGatewaySessionReset) — safe for main.
+      mockGatewayClient.request
+        .mockResolvedValueOnce(SESSIONS_RESET_RESPONSE)
+        .mockResolvedValueOnce(SESSIONS_LIST_RESPONSE);
+
+      await useSessionsStore.getState().clearSession('main');
+
+      expect(mockGatewayClient.request).toHaveBeenCalledWith(
+        'sessions.reset',
+        { key: 'main' },
+      );
+    });
+
+    it('reloads chat history and usage when clearing the active session (normalized key match)', async () => {
+      // Active key is persisted as bare 'main' while list rows carry the
+      // canonical 'agent:main:main' — comparison must normalize both sides.
+      mockGatewayClient.request
+        .mockResolvedValueOnce(SESSIONS_RESET_RESPONSE)
+        .mockResolvedValueOnce(SESSIONS_LIST_RESPONSE);
+      useSessionsStore.setState({
+        sessions: SESSIONS_LIST_RESPONSE.sessions,
+        activeSessionKey: 'main',
+      });
+
+      await useSessionsStore.getState().clearSession('agent:main:main');
+
+      expect(mockLoadHistory).toHaveBeenCalled();
+      expect(mockLoadSessionUsage).toHaveBeenCalled();
+      // Clearing keeps the session selected — no switch
+      expect(useSessionsStore.getState().activeSessionKey).toBe('main');
+      expect(mockSetSessionKey).not.toHaveBeenCalled();
+    });
+
+    it('does not reload chat when clearing an inactive session', async () => {
+      mockGatewayClient.request
+        .mockResolvedValueOnce({ ...SESSIONS_RESET_RESPONSE, key: 'agent:main:project-a1b2c3d4' })
+        .mockResolvedValueOnce(SESSIONS_LIST_RESPONSE);
+      useSessionsStore.setState({
+        sessions: SESSIONS_LIST_RESPONSE.sessions,
+        activeSessionKey: 'main',
+      });
+
+      await useSessionsStore.getState().clearSession('agent:main:project-a1b2c3d4');
+
+      expect(mockLoadHistory).not.toHaveBeenCalled();
+      expect(mockLoadSessionUsage).not.toHaveBeenCalled();
+    });
+
+    it('refreshes the session list after a successful reset', async () => {
+      // The reset entry carries a new updatedAt and the derived title changes
+      // (empty transcript) — the list must be re-fetched, not patched locally.
+      mockGatewayClient.request
+        .mockResolvedValueOnce(SESSIONS_RESET_RESPONSE)
+        .mockResolvedValueOnce(SESSIONS_LIST_RESPONSE);
+
+      await useSessionsStore.getState().clearSession('agent:main:main');
+
+      expect(mockGatewayClient.request).toHaveBeenCalledWith(
+        'sessions.list',
+        { includeDerivedTitles: true, limit: 1000 },
+      );
+    });
+
+    it('keeps state untouched when sessions.reset fails', async () => {
+      mockGatewayClient.request.mockRejectedValueOnce(new Error('INVALID_REQUEST'));
+      useSessionsStore.setState({
+        sessions: SESSIONS_LIST_RESPONSE.sessions,
+        activeSessionKey: 'main',
+      });
+
+      await useSessionsStore.getState().clearSession('agent:main:main');
+
+      expect(mockLoadHistory).not.toHaveBeenCalled();
+      expect(useSessionsStore.getState().sessions).toEqual(SESSIONS_LIST_RESPONSE.sessions);
+      // No follow-up sessions.list after a failed reset
+      expect(mockGatewayClient.request).toHaveBeenCalledTimes(1);
     });
   });
 

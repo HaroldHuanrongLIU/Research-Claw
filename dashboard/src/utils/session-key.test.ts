@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { isHeartbeatSessionKey, isMainSessionKey, normalizeSessionKey, toGatewaySessionKey } from './session-key';
+import {
+  isHeartbeatSessionKey,
+  isMainSessionKey,
+  isSubagentSessionKey,
+  normalizeSessionKey,
+  toGatewaySessionKey,
+} from './session-key';
 
 describe('normalizeSessionKey', () => {
   it('strips the canonical agent prefix', () => {
@@ -50,6 +56,26 @@ describe('isHeartbeatSessionKey', () => {
     expect(isHeartbeatSessionKey('xheartbeat')).toBe(false);
     expect(isHeartbeatSessionKey('heartbeats')).toBe(false);
     expect(isHeartbeatSessionKey('agent:main:my-heartbeat-notes')).toBe(false);
+  });
+});
+
+describe('isSubagentSessionKey', () => {
+  it('matches synthetic subagent sessions (canonical + bare)', () => {
+    expect(isSubagentSessionKey('agent:main:subagent:5e8e783e-086f-4f5c-93b6-ba24cd42be93')).toBe(true);
+    expect(isSubagentSessionKey('subagent:5e8e783e-086f-4f5c-93b6-ba24cd42be93')).toBe(true);
+    expect(isSubagentSessionKey('subagent')).toBe(true);
+  });
+
+  it('does not match real user sessions', () => {
+    expect(isSubagentSessionKey('main')).toBe(false);
+    expect(isSubagentSessionKey('agent:main:main')).toBe(false);
+    expect(isSubagentSessionKey('agent:main:project-x')).toBe(false);
+    expect(isSubagentSessionKey('agent:main:main:heartbeat')).toBe(false);
+  });
+
+  it('does not match substrings that are not a subagent segment', () => {
+    expect(isSubagentSessionKey('subagents')).toBe(false);
+    expect(isSubagentSessionKey('agent:main:my-subagent-notes')).toBe(false);
   });
 });
 
