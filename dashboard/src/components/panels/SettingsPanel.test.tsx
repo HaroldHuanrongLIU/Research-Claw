@@ -1533,6 +1533,37 @@ describe('Config picker — re-select guard, draft card, Apply/Save label', () =
     expect(getConfigActionButton().disabled).toBe(true);
   });
 
+  // Fix #1 (inline counterpart): clicking the already-active card in the inline
+  // "Saved API profiles" list must be a no-op. Re-hydrating the active provider
+  // re-derives fields via extractProviderFieldsForEditor, whose `api` falls back
+  // to the preset default (e.g. minimax → anthropic-messages) while the baseline
+  // came from extractConfigFields (openai-completions) — a spurious dirty.
+  it('clicking the already-active inline profile card does not dirty the form', () => {
+    useConfigStore.setState({
+      gatewayConfig: {
+        agents: { defaults: { model: { primary: 'minimax/MiniMax-M2.7' } } },
+        models: {
+          providers: {
+            // No explicit `api` → the two extractors disagree on the api type.
+            minimax: { baseUrl: 'https://api.minimax.io/anthropic', models: [{ id: 'MiniMax-M2.7', name: 'MiniMax M2.7' }] },
+          },
+        },
+      } as unknown as ReturnType<typeof makeGatewayConfig>,
+    });
+    render(<SettingsPanel />);
+
+    // Not dirty on load → footer button disabled.
+    expect(getConfigActionButton().disabled).toBe(true);
+
+    // Click the active inline card (located via its "In use" tag).
+    const card = screen.getByText('settings.apiProfilesInUse').closest('.ant-list-item') as HTMLElement;
+    act(() => {
+      fireEvent.click(card);
+    });
+
+    expect(getConfigActionButton().disabled).toBe(true);
+  });
+
   // Fix #2
   it('shows an unsaved-draft card in the picker after clicking "Add custom profile"', () => {
     useConfigStore.setState({ gatewayConfig: makeProfilesConfig() });

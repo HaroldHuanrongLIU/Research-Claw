@@ -1052,10 +1052,15 @@ export default function SettingsPanel() {
   }, [gatewayConfig]);
 
   const loadApiProfileIntoForm = useCallback((profile: ApiProfile) => {
+    // Selecting the provider you're already on is a no-op. Re-hydrating would
+    // re-derive fields via extractProviderFieldsForEditor — whose `api` falls back
+    // to the preset default when the saved block omits it — which differs from the
+    // baseline produced by extractConfigFields and would spuriously dirty the form.
+    if (profile.id === provider) return;
     handleProviderChange(profile.id);
     profileLabelRef.current[profile.id] = profile.label;
     setProfileLabel(profile.label);
-  }, [handleProviderChange]);
+  }, [handleProviderChange, provider]);
 
   // Single source of truth for the profile list shared by the inline section and
   // the provider picker: persisted profiles + any in-flight (just-created,
