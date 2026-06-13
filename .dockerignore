@@ -14,6 +14,11 @@ config/openclaw.json.*
 config/*.bak
 config/*.bak.*
 config/*.prefix-*
+# Runtime dirs that may hold browser cookies / login / credential material — never bake into the image.
+config/browser/
+config/media/
+config/npm/
+config/plugin-skills/
 
 # User data — volume-mounted at runtime
 .research-claw
