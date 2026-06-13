@@ -41,7 +41,7 @@ import {
   profileIdToDisplayName,
   type ApiProfile,
 } from '../../utils/api-profiles';
-import { PROVIDER_PRESETS, detectPresetFromProvider, getPreset, inferApiFromUrl } from '../../utils/provider-presets';
+import { PROVIDER_PRESETS, detectPresetFromProvider, getPreset, inferApiFromUrl, protocolProbeOrder, type ApiProtocol } from '../../utils/provider-presets';
 import { isOAuthProvider } from '../../utils/oauth-providers';
 import { RC_VERSION } from '../../version';
 import type { CheckUpdatesPayload } from '@/types/app-updates';
@@ -601,6 +601,116 @@ export default function SettingsPanel() {
   }, [supervisorProvider]);
 
   const [saving, setSaving] = useState(false);
+
+  // --- Protocol probe (Test button) state machine ---
+  type ProbeOutcome =
+    | { ok: true; protocol: ApiProtocol }
+    | { ok: false; reason: string };
+  const [probing, setProbing] = useState<'text' | 'vision' | null>(null);
+  const [probeResult, setProbeResult] = useState<{ text?: ProbeOutcome; vision?: ProbeOutcome }>({});
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  /** Map a probe `reason` to its localized message-key. */
+  const probeReasonText = useCallback(
+    (reason: string): string => {
+      switch (reason) {
+        case 'missing-key':
+          return t('settings.probeMissingKeyHint');
+        case 'invalid-url':
+          return t('settings.probeInvalidUrl');
+        case 'auth-failed':
+          return t('settings.probeAuthFailed');
+        case 'no-protocol':
+          return t('settings.probeNoProtocol');
+        case 'network-error':
+        default:
+          return t('settings.probeNetworkError');
+      }
+    },
+    [t],
+  );
+
+  /** Human label for a detected protocol (mirrors the protocol Select labels). */
+  const protocolLabel = useCallback((protocol: ApiProtocol): string => {
+    switch (protocol) {
+      case 'openai-responses':
+        return 'OpenAI Responses';
+      case 'anthropic-messages':
+        return 'Anthropic Compatible';
+      case 'openai-completions':
+      default:
+        return 'OpenAI Compatible';
+    }
+  }, []);
+
+  /** Probe a single endpoint, auto-applying the detected protocol on success. */
+  const runProtocolProbe = useCallback(
+    async (endpoint: 'text' | 'vision') => {
+      if (probing !== null) return;
+      const url = endpoint === 'text' ? baseUrl : visionBaseUrl;
+      const key = endpoint === 'text' ? apiKey : visionApiKey;
+      const model = endpoint === 'text' ? textModel : visionModel;
+      const client = useGatewayStore.getState().client;
+      if (!client?.isConnected) {
+        message.error(t('oauth.notConnected'));
+        return;
+      }
+      setProbing(endpoint);
+      setProbeResult((prev) => ({ ...prev, [endpoint]: undefined }));
+      try {
+        const TIMEOUT_MS = 24000;
+        const result = (await Promise.race([
+          client.request('rc.provider.probeProtocol', {
+            baseUrl: url,
+            apiKey: key,
+            model,
+            order: protocolProbeOrder(url),
+          }),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('probe-timeout')), TIMEOUT_MS),
+          ),
+        ])) as { detected: ApiProtocol | null; reason: string };
+        if (!mountedRef.current) return;
+        if (result.reason === 'detected' && result.detected) {
+          const detected = result.detected;
+          if (endpoint === 'text') setApi(detected);
+          else setVisionApi(detected);
+          setProbeResult((prev) => ({ ...prev, [endpoint]: { ok: true, protocol: detected } }));
+          message.success(`✓ ${t('settings.protocolVerified')}: ${protocolLabel(detected)}`);
+        } else {
+          const reason = result.reason || 'no-protocol';
+          setProbeResult((prev) => ({ ...prev, [endpoint]: { ok: false, reason } }));
+          message.error(probeReasonText(reason));
+        }
+      } catch {
+        if (!mountedRef.current) return;
+        setProbeResult((prev) => ({ ...prev, [endpoint]: { ok: false, reason: 'network-error' } }));
+        message.error(probeReasonText('network-error'));
+      } finally {
+        if (mountedRef.current) setProbing(null);
+      }
+    },
+    [
+      probing,
+      baseUrl,
+      visionBaseUrl,
+      apiKey,
+      visionApiKey,
+      textModel,
+      visionModel,
+      message,
+      t,
+      protocolLabel,
+      probeReasonText,
+    ],
+  );
+
   const pendingRestart = useConfigStore((s) => s.pendingConfigRestart);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [visionAdvancedOpen, setVisionAdvancedOpen] = useState(true);
@@ -1556,6 +1666,7 @@ export default function SettingsPanel() {
             size="small"
             style={{ width: 220, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
             onClick={() => setProviderPickerOpen(true)}
+            disabled={probing === 'text'}
           >
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {isApiProfileProviderKey(provider)
@@ -1607,10 +1718,11 @@ export default function SettingsPanel() {
               if (v.trim()) {
                 apiKeyCacheRef.current[provider] = v.trim();
               }
+              setProbeResult((prev) => ({ ...prev, text: undefined }));
             }}
             size="small"
             style={{ width: 220 }}
-            disabled={isOAuthProviderSelected}
+            disabled={isOAuthProviderSelected || probing === 'text'}
             placeholder={
               isOAuthProviderSelected
                 ? t('setup.openaiCodexOauthNoApiKey')
@@ -1715,26 +1827,65 @@ export default function SettingsPanel() {
                     onChange={(e) => {
                       setBaseUrl(e.target.value);
                       if (isApiProfileProviderKey(provider)) setApi(inferApiFromUrl(e.target.value));
+                      setProbeResult((prev) => ({ ...prev, text: undefined }));
                     }}
                     size="small"
                     style={{ width: 220 }}
                     placeholder="https://api.openai.com/v1"
+                    disabled={probing === 'text'}
                   />
                 </SettingRow>
 
                 {isApiProfileProviderKey(provider) && (
                   <SettingRow label={t('settings.apiProtocol')}>
-                    <Select
-                      value={api}
-                      onChange={setApi}
-                      size="small"
-                      style={{ width: 220 }}
-                      options={[
-                        { value: 'openai-completions', label: 'OpenAI Compatible' },
-                        { value: 'openai-responses', label: 'OpenAI Responses' },
-                        { value: 'anthropic-messages', label: 'Anthropic Compatible' },
-                      ]}
-                    />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 220 }}>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <Select
+                          value={api}
+                          onChange={(v) => {
+                            setApi(v);
+                            setProbeResult((prev) => ({ ...prev, text: undefined }));
+                          }}
+                          size="small"
+                          style={{ flex: 1 }}
+                          disabled={probing === 'text'}
+                          options={[
+                            { value: 'openai-completions', label: 'OpenAI Compatible' },
+                            { value: 'openai-responses', label: 'OpenAI Responses' },
+                            { value: 'anthropic-messages', label: 'Anthropic Compatible' },
+                          ]}
+                        />
+                        <Tooltip title={!apiKey.trim() ? t('settings.probeMissingKeyHint') : undefined}>
+                          <Button
+                            size="small"
+                            onClick={() => runProtocolProbe('text')}
+                            loading={probing === 'text'}
+                            disabled={
+                              saving ||
+                              probing !== null ||
+                              !apiKey.trim() ||
+                              !baseUrl.trim()
+                            }
+                          >
+                            {t('settings.testProtocol')}
+                          </Button>
+                        </Tooltip>
+                      </div>
+                      {probing === 'text' ? (
+                        <Text type="secondary" style={{ fontSize: 11 }}>
+                          {t('settings.protocolTesting')}
+                        </Text>
+                      ) : probeResult.text?.ok ? (
+                        <Text type="success" style={{ fontSize: 11 }}>
+                          {`✓ ${t('settings.protocolVerified')}: `}
+                          {protocolLabel(probeResult.text.protocol)}
+                        </Text>
+                      ) : probeResult.text && !probeResult.text.ok ? (
+                        <Text type="danger" style={{ fontSize: 11 }}>
+                          {`✗ ${probeReasonText(probeResult.text.reason)}`}
+                        </Text>
+                      ) : null}
+                    </div>
                   </SettingRow>
                 )}
               </>
@@ -1758,6 +1909,7 @@ export default function SettingsPanel() {
                 size="small"
                 style={{ width: 220, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
                 onClick={() => setVisionProviderPickerOpen(true)}
+                disabled={probing === 'vision'}
               >
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {providerLabel(visionProvider, t)}
@@ -1839,26 +1991,65 @@ export default function SettingsPanel() {
                   onChange={(e) => {
                     setVisionBaseUrl(e.target.value);
                     if (isApiProfileProviderKey(visionProvider)) setVisionApi(inferApiFromUrl(e.target.value));
+                    setProbeResult((prev) => ({ ...prev, vision: undefined }));
                   }}
                   size="small"
                   style={{ width: 220 }}
                   placeholder="https://api.openai.com/v1"
+                  disabled={probing === 'vision'}
                 />
               </SettingRow>
 
               {isApiProfileProviderKey(visionProvider) && (
                 <SettingRow label={t('settings.apiProtocol')}>
-                  <Select
-                    value={visionApi}
-                    onChange={setVisionApi}
-                    size="small"
-                    style={{ width: 220 }}
-                    options={[
-                      { value: 'openai-completions', label: 'OpenAI Compatible' },
-                      { value: 'openai-responses', label: 'OpenAI Responses' },
-                      { value: 'anthropic-messages', label: 'Anthropic Compatible' },
-                    ]}
-                  />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 220 }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <Select
+                        value={visionApi}
+                        onChange={(v) => {
+                          setVisionApi(v);
+                          setProbeResult((prev) => ({ ...prev, vision: undefined }));
+                        }}
+                        size="small"
+                        style={{ flex: 1 }}
+                        disabled={probing === 'vision'}
+                        options={[
+                          { value: 'openai-completions', label: 'OpenAI Compatible' },
+                          { value: 'openai-responses', label: 'OpenAI Responses' },
+                          { value: 'anthropic-messages', label: 'Anthropic Compatible' },
+                        ]}
+                      />
+                      <Tooltip title={!visionApiKey.trim() ? t('settings.probeMissingKeyHint') : undefined}>
+                        <Button
+                          size="small"
+                          onClick={() => runProtocolProbe('vision')}
+                          loading={probing === 'vision'}
+                          disabled={
+                            saving ||
+                            probing !== null ||
+                            !visionApiKey.trim() ||
+                            !visionBaseUrl.trim()
+                          }
+                        >
+                          {t('settings.testProtocol')}
+                        </Button>
+                      </Tooltip>
+                    </div>
+                    {probing === 'vision' ? (
+                      <Text type="secondary" style={{ fontSize: 11 }}>
+                        {t('settings.protocolTesting')}
+                      </Text>
+                    ) : probeResult.vision?.ok ? (
+                      <Text type="success" style={{ fontSize: 11 }}>
+                        {`✓ ${t('settings.protocolVerified')}: `}
+                        {protocolLabel(probeResult.vision.protocol)}
+                      </Text>
+                    ) : probeResult.vision && !probeResult.vision.ok ? (
+                      <Text type="danger" style={{ fontSize: 11 }}>
+                        {`✗ ${probeReasonText(probeResult.vision.reason)}`}
+                      </Text>
+                    ) : null}
+                  </div>
                 </SettingRow>
               )}
 
@@ -1874,9 +2065,11 @@ export default function SettingsPanel() {
                       if (v.trim()) {
                         visionApiKeyCacheRef.current[visionProvider] = v.trim();
                       }
+                      setProbeResult((prev) => ({ ...prev, vision: undefined }));
                     }}
                     size="small"
                     style={{ width: 220 }}
+                    disabled={probing === 'vision'}
                     placeholder={currentVisionProviderHasSavedKey && !visionApiKey ? t('setup.apiKeyExisting') : t('setup.apiKeyPlaceholder')}
                   />
                   {visionApiKeyStatus ? (
@@ -2438,7 +2631,7 @@ export default function SettingsPanel() {
             {visionApiKeyStatus ? ` · ${visionApiKeyStatus}` : ''}
           </Text>
         </div>
-        <Button type="primary" size="small" onClick={handleSave} loading={saving || pendingRestart} disabled={pendingRestart || !isDirty} style={{ flexShrink: 0 }}>
+        <Button type="primary" size="small" onClick={handleSave} loading={saving || pendingRestart} disabled={pendingRestart || !isDirty || probing !== null} style={{ flexShrink: 0 }}>
           {pendingRestart ? t('setup.gatewayRestarting') : t('settings.save')}
         </Button>
       </div>

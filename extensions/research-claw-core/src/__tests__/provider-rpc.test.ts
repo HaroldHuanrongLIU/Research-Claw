@@ -129,3 +129,180 @@ describe('provider RPC', () => {
     expect(config.models).toEqual(desiredConfig().models);
   });
 });
+
+interface ProbeResult {
+  detected: string | null;
+  reason: string;
+  attempts: Array<{ protocol: string; endpoint: string; status: number | null; klass: string }>;
+}
+
+function mockFetchByStatus(map: Record<string, number | 'throw'>): ReturnType<typeof vi.fn> {
+  return vi.fn(async (url: string) => {
+    for (const [needle, value] of Object.entries(map)) {
+      if (url.includes(needle)) {
+        if (value === 'throw') throw new Error('network down');
+        return { ok: value >= 200 && value < 300, status: value } as Response;
+      }
+    }
+    throw new Error(`unexpected fetch URL: ${url}`);
+  });
+}
+
+describe('rc.provider.probeProtocol', () => {
+  const baseParams = {
+    baseUrl: 'https://llm.test/v1',
+    apiKey: 'sk-real-key',
+    model: 'gpt-5',
+  };
+
+  it('detects openai-completions on /chat/completions 200 and short-circuits', async () => {
+    const { handlers } = setup();
+    const fetchMock = mockFetchByStatus({ '/chat/completions': 200 });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const result = await handlers.get('rc.provider.probeProtocol')!(baseParams) as ProbeResult;
+      expect(result.detected).toBe('openai-completions');
+      expect(result.reason).toBe('detected');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(result.attempts).toHaveLength(1);
+      expect(result.attempts[0]).toMatchObject({ protocol: 'openai-completions', status: 200, klass: 'hit' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('detects anthropic-messages via /v1/messages 200 when order is anthropic-first', async () => {
+    const { handlers } = setup();
+    const fetchMock = mockFetchByStatus({ '/v1/messages': 200, '/chat/completions': 404 });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const result = await handlers.get('rc.provider.probeProtocol')!({
+        baseUrl: 'https://llm.test/anthropic',
+        apiKey: 'sk-real-key',
+        model: 'claude-4',
+        order: ['anthropic-messages', 'openai-completions'],
+      }) as ProbeResult;
+      expect(result.detected).toBe('anthropic-messages');
+      expect(result.reason).toBe('detected');
+      expect(result.attempts[0].endpoint).toContain('/v1/messages');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('treats 402 as a hit', async () => {
+    const { handlers } = setup();
+    const fetchMock = mockFetchByStatus({ '/chat/completions': 402 });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const result = await handlers.get('rc.provider.probeProtocol')!(baseParams) as ProbeResult;
+      expect(result.detected).toBe('openai-completions');
+      expect(result.attempts[0].klass).toBe('hit');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('returns no-protocol when all candidates 404', async () => {
+    const { handlers } = setup();
+    const fetchMock = mockFetchByStatus({
+      '/chat/completions': 404,
+      '/responses': 404,
+      '/v1/messages': 404,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const result = await handlers.get('rc.provider.probeProtocol')!(baseParams) as ProbeResult;
+      expect(result.detected).toBeNull();
+      expect(result.reason).toBe('no-protocol');
+      expect(result.attempts).toHaveLength(3);
+      expect(result.attempts.every((a) => a.klass === 'absent')).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('returns auth-failed when a candidate is 401', async () => {
+    const { handlers } = setup();
+    const fetchMock = mockFetchByStatus({
+      '/chat/completions': 401,
+      '/responses': 404,
+      '/v1/messages': 404,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const result = await handlers.get('rc.provider.probeProtocol')!(baseParams) as ProbeResult;
+      expect(result.detected).toBeNull();
+      expect(result.reason).toBe('auth-failed');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('returns network-error when every probe throws', async () => {
+    const { handlers } = setup();
+    const fetchMock = mockFetchByStatus({
+      '/chat/completions': 'throw',
+      '/responses': 'throw',
+      '/v1/messages': 'throw',
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const result = await handlers.get('rc.provider.probeProtocol')!(baseParams) as ProbeResult;
+      expect(result.detected).toBeNull();
+      expect(result.reason).toBe('network-error');
+      expect(result.attempts.every((a) => a.klass === 'error')).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('returns missing-key without probing when apiKey is empty', async () => {
+    const { handlers } = setup();
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const result = await handlers.get('rc.provider.probeProtocol')!({
+        ...baseParams,
+        apiKey: '',
+      }) as ProbeResult;
+      expect(result).toEqual({ detected: null, reason: 'missing-key', attempts: [] });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('returns missing-key without probing when apiKey is the redaction sentinel', async () => {
+    const { handlers } = setup();
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const result = await handlers.get('rc.provider.probeProtocol')!({
+        ...baseParams,
+        apiKey: '__OPENCLAW_REDACTED__',
+      }) as ProbeResult;
+      expect(result.reason).toBe('missing-key');
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('rejects a non-HTTP baseUrl as invalid-url', async () => {
+    const { handlers } = setup();
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const result = await handlers.get('rc.provider.probeProtocol')!({
+        ...baseParams,
+        baseUrl: 'ftp://llm.test/v1',
+      }) as ProbeResult;
+      expect(result).toEqual({ detected: null, reason: 'invalid-url', attempts: [] });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

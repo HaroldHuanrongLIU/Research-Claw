@@ -1167,3 +1167,230 @@ describe('Vision independent endpoint + protocol auto-align', () => {
     expect(screen.getAllByText('custom').length).toBeGreaterThan(0);
   });
 });
+
+// ============================================================
+// Task 3c: protocol probe ("Test" button) + state machine + logic locks
+// ============================================================
+
+describe('Protocol probe (Test button) — text endpoint', () => {
+  /** A `custom` (API-profile) text endpoint (no key — tests type one in). */
+  function makeProbeConfig() {
+    return makeGatewayConfig('m1', 'custom', 'https://relay.example/v1');
+  }
+
+  /** Open the text endpoint advanced Collapse so the protocol Select + Test button render. */
+  function openTextAdvanced() {
+    fireEvent.click(screen.getByText('settings.advancedTextEndpoint'));
+  }
+
+  /** Type a key into the text endpoint API key input so probes are allowed.
+   *  A configured-but-redacted key de-redacts to '' in form state, so the probe
+   *  gate (`!apiKey.trim()`) requires an actually-typed key. */
+  function typeTextKey(key = 'sk-test') {
+    const input = screen.getByPlaceholderText('setup.apiKeyPlaceholder');
+    fireEvent.change(input, { target: { value: key } });
+  }
+
+  /** The text endpoint's "Test" button. */
+  function getTextTestButton(): HTMLButtonElement {
+    return screen.getByRole('button', { name: /settings\.testProtocol/i }) as HTMLButtonElement;
+  }
+
+  beforeEach(() => {
+    mockModalConfirm.mockReset();
+    mockMessageSuccess.mockReset();
+    mockMessageError.mockReset();
+    mockMessageWarning.mockReset();
+    useConfigStore.setState({
+      theme: 'dark',
+      locale: 'en',
+      systemPromptAppend: '',
+      bootState: 'ready',
+      pendingConfigRestart: false,
+      gatewayConfig: null,
+      gatewayConfigLoading: false,
+      _configRetryCount: 0,
+    });
+    useGatewayStore.setState({
+      client: createMockClient(),
+      state: 'connected',
+      serverVersion: '0.7.1',
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('auto-applies the detected protocol and shows a verified indicator on success', async () => {
+    const mockRequest = vi.fn().mockImplementation((method: string) => {
+      if (method === 'rc.provider.probeProtocol') {
+        return Promise.resolve({ detected: 'anthropic-messages', reason: 'detected', attempts: [] });
+      }
+      return Promise.resolve({});
+    });
+    useGatewayStore.setState({ client: createMockClient(mockRequest) });
+    useConfigStore.setState({ gatewayConfig: makeProbeConfig() });
+
+    render(<SettingsPanel />);
+    openTextAdvanced();
+    typeTextKey();
+
+    // Before probing, the protocol Select shows the URL-inferred default (completions).
+    expect(screen.getByText('OpenAI Compatible')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(getTextTestButton());
+    });
+
+    // The probe was called against the text endpoint.
+    expect(mockRequest).toHaveBeenCalledWith(
+      'rc.provider.probeProtocol',
+      expect.objectContaining({ baseUrl: 'https://relay.example/v1' }),
+    );
+    // Protocol auto-applied to anthropic → Select now shows the anthropic label.
+    expect(screen.getByText('Anthropic Compatible')).toBeTruthy();
+    // A verified indicator is shown with the protocol label as plain text.
+    expect(screen.getByText('settings.protocolVerified', { exact: false })).toBeTruthy();
+    expect(mockMessageSuccess).toHaveBeenCalled();
+  });
+
+  it('shows a failure indicator and re-enables the Test button on no-protocol', async () => {
+    const mockRequest = vi.fn().mockImplementation((method: string) => {
+      if (method === 'rc.provider.probeProtocol') {
+        return Promise.resolve({ detected: null, reason: 'no-protocol', attempts: [] });
+      }
+      return Promise.resolve({});
+    });
+    useGatewayStore.setState({ client: createMockClient(mockRequest) });
+    useConfigStore.setState({ gatewayConfig: makeProbeConfig() });
+
+    render(<SettingsPanel />);
+    openTextAdvanced();
+    typeTextKey();
+
+    await act(async () => {
+      fireEvent.click(getTextTestButton());
+    });
+
+    // Failure text is shown (mapped reason key) and an error toast fired.
+    expect(screen.getByText('settings.probeNoProtocol', { exact: false })).toBeTruthy();
+    expect(mockMessageError).toHaveBeenCalledWith('settings.probeNoProtocol');
+    // The Test button is enabled again so the user can retry.
+    expect(getTextTestButton().disabled).toBe(false);
+  });
+
+  it('locks Save and freezes the probed URL input while a probe is in flight', async () => {
+    let resolveProbe: (v: unknown) => void = () => {};
+    const deferred = new Promise((resolve) => {
+      resolveProbe = resolve;
+    });
+    const mockRequest = vi.fn().mockImplementation((method: string) => {
+      if (method === 'rc.provider.probeProtocol') return deferred;
+      return Promise.resolve({});
+    });
+    useGatewayStore.setState({ client: createMockClient(mockRequest) });
+    useConfigStore.setState({ gatewayConfig: makeProbeConfig() });
+
+    render(<SettingsPanel />);
+    openTextAdvanced();
+    typeTextKey();
+
+    // Dirty the form so Save would otherwise be enabled.
+    fireEvent.change(screen.getByDisplayValue('m1'), { target: { value: 'm2' } });
+
+    act(() => {
+      fireEvent.click(getTextTestButton());
+    });
+
+    // While probing: Save disabled + URL input frozen.
+    const saveButtons = screen.getAllByRole('button', { name: /settings\.save|setup\.gatewayRestarting/i });
+    const saveBtn = (saveButtons.find((b) => b.parentElement?.textContent?.includes('settings.restartHint')) ?? saveButtons[0]) as HTMLButtonElement;
+    expect(saveBtn.disabled).toBe(true);
+    expect((screen.getByDisplayValue('https://relay.example/v1') as HTMLInputElement).disabled).toBe(true);
+
+    // Resolve so the finally unlocks (avoid the 24s race).
+    await act(async () => {
+      resolveProbe({ detected: 'openai-completions', reason: 'detected', attempts: [] });
+    });
+
+    expect((screen.getByDisplayValue('https://relay.example/v1') as HTMLInputElement).disabled).toBe(false);
+  });
+
+  it('disables the vision Test button while the text probe is in flight (single-flight)', async () => {
+    let resolveProbe: (v: unknown) => void = () => {};
+    const deferred = new Promise((resolve) => {
+      resolveProbe = resolve;
+    });
+    const mockRequest = vi.fn().mockImplementation((method: string) => {
+      if (method === 'rc.provider.probeProtocol') return deferred;
+      return Promise.resolve({});
+    });
+    useGatewayStore.setState({ client: createMockClient(mockRequest) });
+
+    // Text on `custom`, vision on a distinct `custom-vis` profile (no saved keys,
+    // so the tests type their own) so both Test buttons render.
+    const cfg = {
+      agents: {
+        defaults: {
+          model: { primary: 'custom/m1' },
+          imageModel: { primary: 'custom-vis/v1' },
+        },
+      },
+      models: {
+        providers: {
+          custom: {
+            baseUrl: 'https://relay.example/v1',
+            api: 'openai-completions',
+            models: [{ id: 'm1', name: 'm1' }],
+          },
+          'custom-vis': {
+            baseUrl: 'https://vision.example/v1',
+            api: 'openai-completions',
+            models: [{ id: 'v1', name: 'v1' }],
+          },
+        },
+      },
+    };
+    useConfigStore.setState({ gatewayConfig: cfg as ReturnType<typeof makeGatewayConfig> });
+
+    render(<SettingsPanel />);
+    openTextAdvanced();
+
+    // Provide keys for both endpoints so their Test buttons are enabled.
+    const keyInputs = screen.getAllByPlaceholderText('setup.apiKeyPlaceholder');
+    fireEvent.change(keyInputs[0], { target: { value: 'sk-text' } });
+    fireEvent.change(keyInputs[1], { target: { value: 'sk-vision' } });
+
+    // Both endpoints expose a Test button (text + vision).
+    const testButtonsBefore = screen.getAllByRole('button', { name: /settings\.testProtocol/i });
+    expect(testButtonsBefore.length).toBe(2);
+
+    // Start the text probe (first Test button).
+    act(() => {
+      fireEvent.click(testButtonsBefore[0]);
+    });
+
+    // All Test buttons are now disabled (text = loading/active, vision = single-flight lock).
+    const testButtonsDuring = screen.getAllByRole('button', { name: /settings\.testProtocol/i });
+    for (const btn of testButtonsDuring) {
+      expect((btn as HTMLButtonElement).disabled).toBe(true);
+    }
+
+    await act(async () => {
+      resolveProbe({ detected: 'openai-completions', reason: 'detected', attempts: [] });
+    });
+  });
+
+  it('disables the Test button when the endpoint key is empty', () => {
+    // Config with a `custom` provider but NO saved key → empty text key.
+    useConfigStore.setState({
+      gatewayConfig: makeGatewayConfig('m1', 'custom', 'https://relay.example/v1'),
+    });
+
+    render(<SettingsPanel />);
+    openTextAdvanced();
+
+    expect(getTextTestButton().disabled).toBe(true);
+  });
+});

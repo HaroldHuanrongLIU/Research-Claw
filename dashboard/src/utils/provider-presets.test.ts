@@ -8,6 +8,7 @@ import {
   getPreset,
   detectPresetFromProvider,
   inferApiFromUrl,
+  protocolProbeOrder,
 } from './provider-presets';
 
 describe('MiniMax provider presets (PR #18)', () => {
@@ -179,5 +180,56 @@ describe('inferApiFromUrl', () => {
 
   it('returns anthropic-messages for the anthropic.com host', () => {
     expect(inferApiFromUrl('https://api.anthropic.com')).toBe('anthropic-messages');
+  });
+});
+
+describe('protocolProbeOrder', () => {
+  it('probes anthropic-messages first for the anthropic.com host', () => {
+    expect(protocolProbeOrder('https://api.anthropic.com')).toEqual([
+      'anthropic-messages',
+      'openai-completions',
+      'openai-responses',
+    ]);
+  });
+
+  it('probes anthropic-messages first for a /anthropic path', () => {
+    expect(protocolProbeOrder('https://api.minimax.io/anthropic')).toEqual([
+      'anthropic-messages',
+      'openai-completions',
+      'openai-responses',
+    ]);
+  });
+
+  it('probes openai-completions first for an OpenAI-compatible url', () => {
+    expect(protocolProbeOrder('https://api.deepseek.com')).toEqual([
+      'openai-completions',
+      'openai-responses',
+      'anthropic-messages',
+    ]);
+  });
+
+  it('probes openai-completions first for a non-anthropic vendor url', () => {
+    expect(protocolProbeOrder('https://open.bigmodel.cn/api/coding/paas/v4')).toEqual([
+      'openai-completions',
+      'openai-responses',
+      'anthropic-messages',
+    ]);
+  });
+
+  it('falls back to completions-first for an empty url', () => {
+    expect(protocolProbeOrder('')).toEqual([
+      'openai-completions',
+      'openai-responses',
+      'anthropic-messages',
+    ]);
+  });
+
+  it('falls back to completions-first for garbage input without throwing', () => {
+    // @ts-expect-error — intentionally passing non-string garbage to assert robustness
+    expect(protocolProbeOrder({ not: 'a url' })).toEqual([
+      'openai-completions',
+      'openai-responses',
+      'anthropic-messages',
+    ]);
   });
 });

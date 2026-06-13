@@ -182,6 +182,154 @@ async function probeProvider(desired: ConfigRecord): Promise<{
   }
 }
 
+/** The three LLM API protocols this satellite can auto-detect. */
+type ApiProtocol = 'openai-completions' | 'openai-responses' | 'anthropic-messages';
+
+const PROBE_PROTOCOLS: readonly ApiProtocol[] = [
+  'openai-completions',
+  'openai-responses',
+  'anthropic-messages',
+];
+
+const REDACTED_API_KEY = '__OPENCLAW_REDACTED__';
+
+type ProbeClass = 'hit' | 'auth' | 'absent' | 'error';
+
+interface ProbeAttempt {
+  protocol: ApiProtocol;
+  endpoint: string;
+  status: number | null;
+  klass: ProbeClass;
+}
+
+interface ProbeProtocolResult {
+  detected: ApiProtocol | null;
+  reason: string;
+  attempts: ProbeAttempt[];
+}
+
+/** Classify a probe by HTTP status only — 404 bodies are too inconsistent to parse. */
+function classifyStatus(status: number): ProbeClass {
+  if (status === 200 || status === 400 || status === 402 || status === 429) return 'hit';
+  if (status === 401 || status === 403) return 'auth';
+  if (status === 404 || status === 405) return 'absent';
+  return 'error'; // >= 500 and anything else unexpected
+}
+
+/** Build the endpoint + request init for probing a single protocol. */
+function buildProbe(
+  protocol: ApiProtocol,
+  base: string,
+  apiKey: string,
+  model: string,
+  signal: AbortSignal,
+): { endpoint: string; init: RequestInit } {
+  switch (protocol) {
+    case 'openai-completions':
+      return {
+        endpoint: `${base}/chat/completions`,
+        init: {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1 }),
+          signal,
+        },
+      };
+    case 'openai-responses':
+      return {
+        endpoint: `${base}/responses`,
+        init: {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({ model, input: 'ping', max_output_tokens: 1 }),
+          signal,
+        },
+      };
+    case 'anthropic-messages':
+      return {
+        // Anthropic requires the /v1 segment even when the base ends with /anthropic.
+        endpoint: `${base}/v1/messages`,
+        init: {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1 }),
+          signal,
+        },
+      };
+  }
+}
+
+/** Normalize the requested probe order: honor `order` when given, dedupe, drop unknowns. */
+function resolveProbeOrder(order: unknown): ApiProtocol[] {
+  if (!Array.isArray(order)) return [...PROBE_PROTOCOLS];
+  const seen = new Set<ApiProtocol>();
+  const resolved: ApiProtocol[] = [];
+  for (const value of order) {
+    if (typeof value !== 'string') continue;
+    if (!PROBE_PROTOCOLS.includes(value as ApiProtocol)) continue;
+    const protocol = value as ApiProtocol;
+    if (seen.has(protocol)) continue;
+    seen.add(protocol);
+    resolved.push(protocol);
+  }
+  return resolved.length ? resolved : [...PROBE_PROTOCOLS];
+}
+
+/**
+ * Detect which LLM API protocol a provider base URL speaks by sending real probe
+ * requests (the browser cannot, due to CORS). Classifies purely on HTTP status and
+ * short-circuits the moment a probe scores a `hit`.
+ */
+async function probeProtocol(params: Record<string, unknown>): Promise<ProbeProtocolResult> {
+  const apiKey = typeof params.apiKey === 'string' ? params.apiKey : '';
+  if (!apiKey || apiKey === REDACTED_API_KEY) {
+    return { detected: null, reason: 'missing-key', attempts: [] };
+  }
+
+  const rawBaseUrl = typeof params.baseUrl === 'string' ? params.baseUrl : '';
+  const base = rawBaseUrl.replace(/\/+$/, '');
+  if (!base || !/^https?:\/\//i.test(base)) {
+    return { detected: null, reason: 'invalid-url', attempts: [] };
+  }
+
+  const model = typeof params.model === 'string' && params.model ? params.model : 'probe';
+  const order = resolveProbeOrder(params.order);
+  const attempts: ProbeAttempt[] = [];
+
+  for (const protocol of order) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8_000);
+    const { endpoint, init } = buildProbe(protocol, base, apiKey, model, controller.signal);
+    try {
+      const response = await fetch(endpoint, init);
+      const klass = classifyStatus(response.status);
+      attempts.push({ protocol, endpoint, status: response.status, klass });
+      if (klass === 'hit') {
+        return { detected: protocol, reason: 'detected', attempts };
+      }
+    } catch {
+      attempts.push({ protocol, endpoint, status: null, klass: 'error' });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  if (attempts.some((a) => a.klass === 'auth')) {
+    return { detected: null, reason: 'auth-failed', attempts };
+  }
+  if (attempts.length > 0 && attempts.every((a) => a.klass === 'absent')) {
+    return { detected: null, reason: 'no-protocol', attempts };
+  }
+  if (attempts.some((a) => a.klass === 'error')) {
+    return { detected: null, reason: 'network-error', attempts };
+  }
+  return { detected: null, reason: 'no-protocol', attempts };
+}
+
 export function registerProviderRpc(registerMethod: RegisterMethod, deps: ProviderRpcDeps): void {
   registerMethod('rc.provider.status', () => {
     const config = clone(deps.config.current());
@@ -263,6 +411,8 @@ export function registerProviderRpc(registerMethod: RegisterMethod, deps: Provid
     });
     return { ok: true, primary, imagePrimary, path: result.path, restartManagedByGateway: true };
   });
+
+  registerMethod('rc.provider.probeProtocol', (params) => probeProtocol(params));
 
   registerMethod('rc.provider.delete', async (params) => {
     const desired = asRecord(params.desiredConfig);

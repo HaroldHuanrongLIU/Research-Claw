@@ -535,6 +535,20 @@ export function inferApiFromUrl(baseUrl: string): ApiProtocol {
 }
 
 /**
+ * Decide the order in which to probe the 3 LLM API protocols, most-likely-first,
+ * based on URL markers. Feeds the gateway's protocol auto-detection probe.
+ * Anthropic-signalling URLs probe anthropic-messages first; otherwise completions first.
+ * Never throws — garbage/empty input falls back to the completions-first order.
+ */
+export function protocolProbeOrder(baseUrl: string): ApiProtocol[] {
+  const url = typeof baseUrl === 'string' ? baseUrl : '';
+  if (inferApiFromUrl(url) === 'anthropic-messages') {
+    return ['anthropic-messages', 'openai-completions', 'openai-responses'];
+  }
+  return ['openai-completions', 'openai-responses', 'anthropic-messages'];
+}
+
+/**
  * Detect which preset matches a provider key from config.
  * First tries exact id match, then falls back to URL detection.
  */
