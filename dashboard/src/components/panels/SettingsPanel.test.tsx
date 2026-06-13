@@ -1599,6 +1599,32 @@ describe('Config picker — re-select guard, draft card, Apply/Save label', () =
     expect(btn.textContent).not.toContain('settings.apply');
   });
 
+  // Fix #3 (d)
+  it('labels the footer button "Save" when editing a field after switching to a saved profile', () => {
+    useConfigStore.setState({
+      gatewayConfig: makeProfilesConfig({
+        'custom-2': { baseUrl: 'https://b.example/v1', api: 'openai-completions', models: [{ id: 'm2', name: 'm2' }] },
+      }),
+    });
+    render(<SettingsPanel />);
+
+    openProviderPicker('custom');
+    clickPickerItem('custom-2'); // pure switch → Apply
+
+    expect(getConfigActionButton().textContent).toContain('settings.apply');
+
+    // Editing any field after the switch introduces new data → Save, not Apply.
+    const keyInput = screen.getByPlaceholderText('setup.apiKeyPlaceholder');
+    act(() => {
+      fireEvent.change(keyInput, { target: { value: 'sk-edited' } });
+    });
+
+    const btn = getConfigActionButton();
+    expect(btn.disabled).toBe(false);
+    expect(btn.textContent).toContain('settings.save');
+    expect(btn.textContent).not.toContain('settings.apply');
+  });
+
   // Inline list ↔ picker parity: a draft created from the inline "Add" button
   // surfaces as an unsaved card in the inline profile list (same source as the picker).
   it('surfaces the just-added draft as an unsaved card in the inline profile list', () => {

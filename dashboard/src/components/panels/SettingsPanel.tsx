@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   App,
   AutoComplete,
@@ -404,17 +404,6 @@ function AboutSection() {
       >
         {restarting ? t('settings.restarting') : t('settings.restart')}
       </Button>
-
-      <div style={{ marginTop: 8, textAlign: 'center' }}>
-        <a
-          href="https://github.com/wentorai/Research-Claw"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ color: tokens.accent.blue, fontSize: 12 }}
-        >
-          {t('settings.aboutGithub')}
-        </a>
-      </div>
     </>
   );
 }
@@ -830,6 +819,15 @@ export default function SettingsPanel() {
 
   const isDirty = configBaseline !== null && formSignature !== configBaseline;
 
+  // Snapshot the form signature at the moment the active provider switches (or
+  // re-hydrates). Because handleProviderChange hydrates every field synchronously
+  // in the same render, this captures the target provider's pristine signature.
+  // A later divergence means the user edited fields after switching → Save, not Apply.
+  const [switchSignature, setSwitchSignature] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    setSwitchSignature(formSignatureRef.current);
+  }, [provider]);
+
   // Supervisor provider helpers (depend on authConfiguredByProvider)
   const supervisorIsOAuth = supervisorProvider ? isOAuthProvider(supervisorProvider) : false;
   const supervisorProviderHasSavedKey = useCallback((id: string) => {
@@ -1130,7 +1128,11 @@ export default function SettingsPanel() {
   const switchedActiveProvider = baselineProvider !== null && provider !== baselineProvider;
   const targetProviderIsSaved =
     !isApiProfileProviderKey(provider) || apiProfiles.some((p) => p.id === provider);
-  const isApplyAction = isDirty && switchedActiveProvider && targetProviderIsSaved;
+  // Editing any field after the switch means there's new data to persist, so the
+  // action is a Save, not a pure activation (Apply).
+  const editedAfterSwitch = switchSignature !== null && formSignature !== switchSignature;
+  const isApplyAction =
+    isDirty && switchedActiveProvider && targetProviderIsSaved && !editedAfterSwitch;
 
   const beginNewCustomProfile = useCallback(() => {
     const cfg = projectConfigCacheRef.current ?? (gatewayConfig as unknown as Record<string, unknown> | null);

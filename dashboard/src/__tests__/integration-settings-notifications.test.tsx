@@ -411,13 +411,6 @@ describe('Issue 7: Version and GitHub link', () => {
     expect(githubLinks.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('renders the "View on GitHub" text (settings.aboutGithub)', () => {
-    render(<SettingsPanel />);
-
-    // The i18n key is returned as-is by our mock
-    expect(screen.getByText('settings.aboutGithub')).toBeInTheDocument();
-  });
-
   it('GitHub link opens in a new tab', () => {
     render(<SettingsPanel />);
 

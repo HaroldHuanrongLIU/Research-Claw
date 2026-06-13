@@ -758,7 +758,6 @@
     "supervisorGoalPending": "Goal pending — control model will parse on next message",
     "supervisorTargetConclusions": "Target Conclusions",
     "supervisorNoTargets": "No target conclusions set yet — they will be auto-generated when you start a research task",
-    "aboutGithub": "View on GitHub",
     "updateCheck": "Check for updates (GitHub)",
     "updateNeedConnection": "Connect to the gateway first",
     "updateCheckFailed": "Update check failed",

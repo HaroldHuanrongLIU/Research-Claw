@@ -758,7 +758,6 @@
     "supervisorGoalPending": "目标待确认 — 管控模型将在下次消息时解析",
     "supervisorTargetConclusions": "目标结论",
     "supervisorNoTargets": "尚未设定目标结论 — 开始研究任务后将自动生成",
-    "aboutGithub": "在 GitHub 上查看",
     "updateCheck": "检查更新（GitHub）",
     "updateNeedConnection": "请先连接网关后再检查更新",
     "updateCheckFailed": "检查更新失败",
