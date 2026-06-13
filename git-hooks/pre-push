@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Research-Claw — pre-push:
+#   1) secret-scan the commits about to be pushed (blocks plaintext keys reaching GitHub/Gitee)
+#   2) pnpm build (catch type errors before remote)
+# Bypass (emergency only): git push --no-verify
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+ZERO="0000000000000000000000000000000000000000"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$ZERO" ] && continue          # branch deletion — nothing to scan
+  if [ "$remote_sha" = "$ZERO" ]; then
+    # New branch on remote: diff against origin/main if known, else scan whole tree.
+    if base="$(git rev-parse --verify --quiet origin/main)"; then
+      bash "$ROOT/scripts/secret-scan.sh" --range "$base" "$local_sha"
+    else
+      bash "$ROOT/scripts/secret-scan.sh" --all
+    fi
+  else
+    bash "$ROOT/scripts/secret-scan.sh" --range "$remote_sha" "$local_sha"
+  fi
+done
+
+echo "pre-push: running pnpm build..."
+if ! pnpm build 2>&1 | tail -5; then
+  echo ""
+  echo "pre-push: BUILD FAILED — push aborted."
+  echo "Fix the errors above, then push again. Emergency bypass: git push --no-verify"
+  exit 1
+fi
+echo "pre-push: build OK"

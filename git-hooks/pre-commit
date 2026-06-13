@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Research-Claw — pre-commit: block plaintext secrets from entering the index.
+# Bypass (emergency only): git commit --no-verify
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+exec bash "$ROOT/scripts/secret-scan.sh" --staged

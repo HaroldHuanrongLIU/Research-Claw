@@ -9,6 +9,7 @@
   },
   "packageManager": "pnpm@9.15.0",
   "scripts": {
+    "prepare": "git config core.hooksPath git-hooks 2>/dev/null || true",
     "start": "bash scripts/run.sh",
     "dev": "concurrently \"pnpm --filter dashboard dev\" \"bash scripts/run.sh\"",
     "build": "pnpm build:extensions && pnpm build:dashboard",
