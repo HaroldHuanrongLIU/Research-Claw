@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   alignCardWithCatalog,
+  alignConfigModels,
   findCatalogEntry,
   type OcModelCatalogEntry,
   type RcModelCard,
@@ -187,5 +188,92 @@ describe('alignCardWithCatalog — field-level rules', () => {
     const second = alignCardWithCatalog(provider, first.card, catalog);
     expect(second.changed).toBe(false);
     expect(second.card).toEqual(first.card);
+  });
+});
+
+describe('alignConfigModels — whole-config alignment against OC 2026.6.1', () => {
+  // The shipped research-claw/config/openclaw.json model section.
+  function makeConfig(): Record<string, unknown> {
+    return {
+      models: {
+        providers: {
+          minimax: {
+            api: 'anthropic-messages',
+            models: [
+              { id: 'MiniMax-M2.7', name: 'MiniMax-M2.7', api: 'anthropic-messages', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
+            ],
+          },
+          openai: {
+            api: 'openai-chatgpt-responses',
+            models: [
+              { id: 'gpt-5.4', name: 'gpt-5.4', reasoning: true, input: ['text', 'image'], contextWindow: 128_000, maxTokens: 16_384 },
+            ],
+          },
+          deepseek: {
+            api: 'openai-completions',
+            models: [
+              { id: 'deepseek-v4-pro', name: 'deepseek-v4-pro', reasoning: true, input: ['text'], contextWindow: 1_000_000, maxTokens: 384_000 },
+            ],
+          },
+          'zai-coding': {
+            api: 'openai-completions',
+            models: [
+              { id: 'glm-5v-turbo', name: 'glm-5v-turbo', reasoning: false, input: ['text', 'image'], contextWindow: 32_000, maxTokens: 16_384 },
+            ],
+          },
+        },
+      },
+    };
+  }
+
+  it('aligns exactly the two stale models, leaves the rest untouched', () => {
+    const cfg = makeConfig();
+    const { config, changes } = alignConfigModels(cfg, catalog);
+
+    const byId = Object.fromEntries(changes.map((c) => [c.id, c]));
+    expect(Object.keys(byId).sort()).toEqual(['glm-5v-turbo', 'gpt-5.4']);
+    expect(byId['gpt-5.4']).toMatchObject({ before: 128_000, after: 272_000, matched: 'exact' });
+    expect(byId['glm-5v-turbo']).toMatchObject({ before: 32_000, after: 202_800, matched: 'basename' });
+
+    const providers = (config.models as { providers: Record<string, { models: RcModelCard[] }> }).providers;
+    expect(providers.openai.models[0].contextWindow).toBe(272_000);
+    expect(providers['zai-coding'].models[0].contextWindow).toBe(202_800);
+    // Unchanged models keep their values.
+    expect(providers.deepseek.models[0].contextWindow).toBe(1_000_000);
+    expect(providers.minimax.models[0].contextWindow).toBe(200_000);
+    // api field is never touched.
+    expect(providers.openai.models[0].api).toBeUndefined();
+    expect(providers.minimax.models[0].api).toBe('anthropic-messages');
+    // maxTokens preserved.
+    expect(providers.openai.models[0].maxTokens).toBe(16_384);
+  });
+
+  it('does not mutate the input config (pure)', () => {
+    const cfg = makeConfig();
+    const snapshot = JSON.parse(JSON.stringify(cfg));
+    alignConfigModels(cfg, catalog);
+    expect(cfg).toEqual(snapshot);
+  });
+
+  it('is idempotent: a second pass yields zero changes', () => {
+    const cfg = makeConfig();
+    const first = alignConfigModels(cfg, catalog);
+    const second = alignConfigModels(first.config, catalog);
+    expect(second.changes).toHaveLength(0);
+    expect(second.config).toEqual(first.config);
+  });
+
+  it('an already-aligned config reports no changes on first pass', () => {
+    const cfg = makeConfig();
+    const providers = (cfg.models as { providers: Record<string, { models: RcModelCard[] }> }).providers;
+    providers.openai.models[0].contextWindow = 272_000;
+    providers['zai-coding'].models[0].contextWindow = 202_800;
+    const { changes } = alignConfigModels(cfg, catalog);
+    expect(changes).toHaveLength(0);
+  });
+
+  it('tolerates a config with no models.providers', () => {
+    expect(alignConfigModels({}, catalog).changes).toHaveLength(0);
+    expect(alignConfigModels({ models: {} }, catalog).changes).toHaveLength(0);
   });
 });

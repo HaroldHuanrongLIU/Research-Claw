@@ -20,6 +20,7 @@ import SetupWizard from './components/setup/SetupWizard';
 import CronEventListener from './components/CronEventListener';
 import PaperReviewRunListener from './components/PaperReviewRunListener';
 import ConfigRestartListener from './components/ConfigRestartListener';
+import ModelCatalogAligner from './components/ModelCatalogAligner';
 import type { ChatStreamEvent } from './gateway/types';
 import { useToolStreamStore } from './stores/tool-stream';
 import { useStagedWritingStore } from './stores/staged-writing';
@@ -469,6 +470,7 @@ export default function App() {
       <CronEventListener />
       <PaperReviewRunListener />
       <ConfigRestartListener />
+      <ModelCatalogAligner />
       <div
         style={{
           height: '100vh',

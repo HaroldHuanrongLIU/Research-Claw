@@ -809,6 +809,9 @@
     "tokenFixSystemd": "WSL2 systemd service users:",
     "tokenFixSystemdCmd": "systemctl --user restart research-claw"
   },
+  "modelCatalog": {
+    "aligned": "Aligned context window for {{count}} model(s) from OpenClaw's catalog"
+  },
   "status": {
     "connected": "Connected",
     "disconnected": "Disconnected",

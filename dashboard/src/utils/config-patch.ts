@@ -19,6 +19,8 @@ import {
   type ApiProfile,
 } from './api-profiles';
 import { getPreset } from './provider-presets';
+import { findCatalogEntry } from './oc-catalog-align';
+import { getModelCatalogCache } from './catalog-cache';
 
 /** Sentinel value OpenClaw uses to redact secrets in resolved config */
 export const REDACTED_SENTINEL = '__OPENCLAW_REDACTED__';
@@ -172,7 +174,7 @@ export function isLocalProvider(providerKey: string): boolean {
  * Unknown models (not in preset) default to ['text', 'image'] so that custom
  * models don't silently drop images.
  */
-function resolveModelDef(
+export function resolveModelDef(
   provider: string,
   modelId: string,
   options?: { profileLabel?: string },
@@ -182,12 +184,21 @@ function resolveModelDef(
   const profileLabel = options?.profileLabel?.trim();
   const displayName =
     profileLabel && isApiProfileProviderKey(provider) ? profileLabel : modelId;
+
+  // OpenClaw's authoritative catalog (cached at startup) overrides the static
+  // preset for the fields it owns; then preset; then the hard defaults. This
+  // keeps interactively-saved cards in sync with the startup aligner. `api` is
+  // never derived here — it's owned by the protocol probe.
+  const cache = getModelCatalogCache();
+  const oc = cache ? findCatalogEntry(provider, modelId, cache)?.entry : undefined;
+  const ocCtx = oc ? (oc.contextWindow ?? oc.contextTokens) : undefined;
+
   return {
     id: modelId,
     name: displayName,
-    reasoning: known?.reasoning ?? false,
-    input: known?.input ?? ['text', 'image'],
-    contextWindow: known?.contextWindow ?? 32_000,
+    reasoning: oc?.reasoning ?? known?.reasoning ?? false,
+    input: oc?.input ?? known?.input ?? ['text', 'image'],
+    contextWindow: ocCtx ?? known?.contextWindow ?? 32_000,
     maxTokens: known?.maxTokens ?? 16_384,
   };
 }

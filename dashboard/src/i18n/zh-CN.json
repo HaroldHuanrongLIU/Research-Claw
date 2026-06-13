@@ -809,6 +809,9 @@
     "tokenFixSystemd": "WSL2 systemd 服务用户：",
     "tokenFixSystemdCmd": "systemctl --user restart research-claw"
   },
+  "modelCatalog": {
+    "aligned": "已按 OpenClaw 权威目录校正 {{count}} 个模型的上下文窗口"
+  },
   "status": {
     "connected": "已连接",
     "disconnected": "已断开",

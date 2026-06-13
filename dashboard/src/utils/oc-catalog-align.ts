@@ -157,3 +157,62 @@ export function alignCardWithCatalog(
     },
   };
 }
+
+export interface ConfigModelChange {
+  provider: string;
+  id: string;
+  /** contextWindow before → after (the field that drives compaction sizing). */
+  before: number | undefined;
+  after: number | undefined;
+  matched: CatalogMatchKind;
+}
+
+export interface ConfigAlignResult {
+  /** A deep clone of the input config with managed card fields aligned. */
+  config: Record<string, unknown>;
+  /** One entry per model whose managed fields actually changed. */
+  changes: ConfigModelChange[];
+}
+
+interface ConfigProviderShape {
+  models?: RcModelCard[];
+}
+
+/**
+ * Align every model card under `config.models.providers[*].models[]` against the
+ * OC catalog. Pure: the input config is deep-cloned, never mutated. Returns the
+ * aligned clone plus a change list (empty when nothing moved → caller can skip
+ * the write-back entirely, keeping startup idempotent).
+ */
+export function alignConfigModels(
+  config: Record<string, unknown>,
+  catalog: OcModelCatalogEntry[],
+): ConfigAlignResult {
+  const next = structuredClone(config);
+  const changes: ConfigModelChange[] = [];
+
+  const providers = (
+    next.models as { providers?: Record<string, ConfigProviderShape> } | undefined
+  )?.providers;
+  if (!providers) return { config: next, changes };
+
+  for (const [providerKey, providerDef] of Object.entries(providers)) {
+    const models = providerDef?.models;
+    if (!Array.isArray(models)) continue;
+    models.forEach((card, i) => {
+      if (!card || typeof card.id !== 'string') return;
+      const r = alignCardWithCatalog(providerKey, card, catalog);
+      if (!r.changed) return;
+      models[i] = r.card;
+      changes.push({
+        provider: providerKey,
+        id: card.id,
+        before: r.before.contextWindow,
+        after: r.after.contextWindow,
+        matched: r.matched,
+      });
+    });
+  }
+
+  return { config: next, changes };
+}
