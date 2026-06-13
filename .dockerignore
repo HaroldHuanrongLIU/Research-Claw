@@ -7,7 +7,13 @@ dashboard/dist
 extensions/*/dist
 
 # User config — volume-mounted at runtime (template is kept separately)
+# Exclude every openclaw.json snapshot/backup (.bak, .last-good, .prefix-<timestamp>) —
+# they may hold plaintext secrets and must never bake into the released image.
 config/openclaw.json
+config/openclaw.json.*
+config/*.bak
+config/*.bak.*
+config/*.prefix-*
 
 # User data — volume-mounted at runtime
 .research-claw

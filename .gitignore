@@ -9,9 +9,13 @@ dashboard/dist/
 *.d.ts.map
 
 # Runtime config (use openclaw.example.json as template)
+# Any openclaw.json snapshot/backup variant may contain plaintext secrets — never commit.
+# Catch-all covers .bak, .bak.N, .last-good, .prefix-<timestamp>, etc.; example template is unaffected.
 config/openclaw.json
+config/openclaw.json.*
 config/*.bak
 config/*.bak.*
+config/*.prefix-*
 config/openclaw.json.last-good
 
 # Browser/runtime data written under config/ at runtime — never commit.
