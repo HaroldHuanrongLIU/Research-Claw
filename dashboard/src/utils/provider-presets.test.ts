@@ -7,6 +7,7 @@ import {
   PROVIDER_PRESETS,
   getPreset,
   detectPresetFromProvider,
+  inferApiFromUrl,
 } from './provider-presets';
 
 describe('MiniMax provider presets (PR #18)', () => {
@@ -160,5 +161,23 @@ describe('DeepSeek provider preset', () => {
   it('can be resolved by provider key', () => {
     expect(detectPresetFromProvider('deepseek')).toBe('deepseek');
     expect(getPreset('deepseek').id).toBe('deepseek');
+  });
+});
+
+describe('inferApiFromUrl', () => {
+  it('defaults to openai-completions for empty url', () => {
+    expect(inferApiFromUrl('')).toBe('openai-completions');
+  });
+
+  it('returns openai-completions for an OpenAI-compatible url', () => {
+    expect(inferApiFromUrl('https://api.openai.com/v1')).toBe('openai-completions');
+  });
+
+  it('returns anthropic-messages for a url with /anthropic path', () => {
+    expect(inferApiFromUrl('https://foo/anthropic')).toBe('anthropic-messages');
+  });
+
+  it('returns anthropic-messages for the anthropic.com host', () => {
+    expect(inferApiFromUrl('https://api.anthropic.com')).toBe('anthropic-messages');
   });
 });

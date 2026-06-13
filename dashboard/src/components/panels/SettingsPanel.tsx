@@ -41,7 +41,7 @@ import {
   profileIdToDisplayName,
   type ApiProfile,
 } from '../../utils/api-profiles';
-import { PROVIDER_PRESETS, detectPresetFromProvider, getPreset } from '../../utils/provider-presets';
+import { PROVIDER_PRESETS, detectPresetFromProvider, getPreset, inferApiFromUrl } from '../../utils/provider-presets';
 import { isOAuthProvider } from '../../utils/oauth-providers';
 import { RC_VERSION } from '../../version';
 import type { CheckUpdatesPayload } from '@/types/app-updates';
@@ -603,6 +603,7 @@ export default function SettingsPanel() {
   const [saving, setSaving] = useState(false);
   const pendingRestart = useConfigStore((s) => s.pendingConfigRestart);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [visionAdvancedOpen, setVisionAdvancedOpen] = useState(true);
 
   // Dirty tracking: the Save button stays disabled until a config-class field
   // diverges from the last config-driven snapshot. UI-only prefs (showSystemFiles,
@@ -987,6 +988,19 @@ export default function SettingsPanel() {
       }
     }
   }, [authConfiguredByProvider, gatewayConfig]);
+
+  const beginNewVisionCustomProfile = useCallback(() => {
+    const cfg = projectConfigCacheRef.current ?? (gatewayConfig as unknown as Record<string, unknown> | null);
+    const existingIds = new Set(listApiProfilesFromConfig(cfg).map((p) => p.id));
+    for (const id of Object.keys(profileLabelRef.current)) {
+      if (isApiProfileProviderKey(id)) existingIds.add(id);
+    }
+    if (isApiProfileProviderKey(provider)) existingIds.add(provider);
+    if (isApiProfileProviderKey(visionProvider)) existingIds.add(visionProvider);
+    const providerId = allocateNextProfileProviderId(existingIds);
+    setVisionAdvancedOpen(true);
+    handleVisionProviderChange(providerId);
+  }, [gatewayConfig, handleVisionProviderChange, provider, visionProvider]);
 
   const currentPreset = getPreset(provider);
   const modelOptions = buildModelOptions(
@@ -1698,7 +1712,10 @@ export default function SettingsPanel() {
                 <SettingRow label={t('settings.customApiUrl')}>
                   <Input
                     value={baseUrl}
-                    onChange={(e) => setBaseUrl(e.target.value)}
+                    onChange={(e) => {
+                      setBaseUrl(e.target.value);
+                      if (isApiProfileProviderKey(provider)) setApi(inferApiFromUrl(e.target.value));
+                    }}
                     size="small"
                     style={{ width: 220 }}
                     placeholder="https://api.openai.com/v1"
@@ -1754,6 +1771,11 @@ export default function SettingsPanel() {
                 open={visionProviderPickerOpen}
                 value={visionProvider}
                 title={t('settings.visionProvider')}
+                savedCustomProfiles={savedCustomProfileOptions}
+                onAddCustomProfile={() => {
+                  setVisionProviderPickerOpen(false);
+                  beginNewVisionCustomProfile();
+                }}
                 onSelect={(id) => {
                   setVisionProviderPickerOpen(false);
                   handleVisionProviderChange(id);
@@ -1762,6 +1784,17 @@ export default function SettingsPanel() {
               />
             </>
           </SettingRow>
+
+          {visionEnabled && visionProvider === provider && (isApiProfileProviderKey(visionProvider) || visionProvider === 'ollama') && (
+            <div style={{ padding: '0 0 4px 0' }}>
+              <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+                {t('settings.visionInheritsText', {
+                  defaultValue:
+                    'Vision uses the text endpoint. To use a separate endpoint, pick or create a different configuration.',
+                })}
+              </span>
+            </div>
+          )}
 
           <SettingRow label={t('settings.visionModel')}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -1788,18 +1821,46 @@ export default function SettingsPanel() {
             </div>
           </SettingRow>
 
-          {/* Vision API URL + Key — only when different provider */}
+          {/* Vision API URL + Protocol + Key — only when different provider */}
           {visionSeparateProvider && (
+            <Collapse
+              activeKey={visionAdvancedOpen ? ['vision-advanced'] : []}
+              onChange={(keys) => setVisionAdvancedOpen((keys as string[]).includes('vision-advanced'))}
+              size="small"
+              items={[
+                {
+                  key: 'vision-advanced',
+                  label: t('settings.advancedVisionEndpoint', { defaultValue: 'Vision Endpoint Advanced' }),
+                  children: (
             <>
               <SettingRow label={t('settings.visionBaseUrl')}>
                 <Input
                   value={visionBaseUrl}
-                  onChange={(e) => setVisionBaseUrl(e.target.value)}
+                  onChange={(e) => {
+                    setVisionBaseUrl(e.target.value);
+                    if (isApiProfileProviderKey(visionProvider)) setVisionApi(inferApiFromUrl(e.target.value));
+                  }}
                   size="small"
                   style={{ width: 220 }}
                   placeholder="https://api.openai.com/v1"
                 />
               </SettingRow>
+
+              {isApiProfileProviderKey(visionProvider) && (
+                <SettingRow label={t('settings.apiProtocol')}>
+                  <Select
+                    value={visionApi}
+                    onChange={setVisionApi}
+                    size="small"
+                    style={{ width: 220 }}
+                    options={[
+                      { value: 'openai-completions', label: 'OpenAI Compatible' },
+                      { value: 'openai-responses', label: 'OpenAI Responses' },
+                      { value: 'anthropic-messages', label: 'Anthropic Compatible' },
+                    ]}
+                  />
+                </SettingRow>
+              )}
 
               <SettingRow label={t('settings.visionApiKey')}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 220 }}>
@@ -1845,6 +1906,10 @@ export default function SettingsPanel() {
                 </div>
               </SettingRow>
             </>
+                  ),
+                },
+              ]}
+            />
           )}
         </>
       )}

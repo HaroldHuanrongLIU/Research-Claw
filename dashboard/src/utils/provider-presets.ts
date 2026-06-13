@@ -522,6 +522,18 @@ export function detectPresetFromUrl(baseUrl: string): string {
   return 'custom';
 }
 
+export type ApiProtocol = 'openai-completions' | 'openai-responses' | 'anthropic-messages';
+
+/**
+ * Infer the (user-selectable) API protocol from a base URL. Only the 3 supported
+ * protocols; completions/responses are indistinguishable from a URL so default to completions.
+ */
+export function inferApiFromUrl(baseUrl: string): ApiProtocol {
+  const u = (baseUrl || '').toLowerCase();
+  if (u.includes('/anthropic') || u.includes('anthropic.com')) return 'anthropic-messages';
+  return 'openai-completions';
+}
+
 /**
  * Detect which preset matches a provider key from config.
  * First tries exact id match, then falls back to URL detection.

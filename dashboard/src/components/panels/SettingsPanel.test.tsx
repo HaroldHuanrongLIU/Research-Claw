@@ -962,3 +962,208 @@ describe('Save button dirty gating', () => {
     expect(getConfigSaveButton().disabled).toBe(true);
   });
 });
+
+// ============================================================
+// Task 2: independent vision endpoint + protocol auto-align
+// ============================================================
+
+describe('Vision independent endpoint + protocol auto-align', () => {
+  /** Text on openai, vision on a distinct custom-* profile. */
+  function makeSeparateVisionConfig() {
+    return {
+      agents: {
+        defaults: {
+          model: { primary: 'openai/gpt-4o' },
+          imageModel: { primary: 'custom-relay-b/qwen-vl' },
+        },
+      },
+      models: {
+        providers: {
+          openai: {
+            baseUrl: 'https://api.openai.com/v1',
+            api: 'openai-completions',
+            apiKey: '__OPENCLAW_REDACTED__',
+            models: [{ id: 'gpt-4o', name: 'GPT-4o' }],
+          },
+          'custom-relay-b': {
+            baseUrl: 'https://b.example/v1',
+            api: 'openai-completions',
+            apiKey: '__OPENCLAW_REDACTED__',
+            models: [{ id: 'qwen-vl', name: 'Qwen VL' }],
+          },
+        },
+      },
+    };
+  }
+
+  /** Text and vision both on bare `custom` (same key → vision inherits). */
+  function makeSharedVisionConfig() {
+    return {
+      agents: {
+        defaults: {
+          model: { primary: 'custom/text-model' },
+          imageModel: { primary: 'custom/vision-model' },
+        },
+      },
+      models: {
+        providers: {
+          custom: {
+            baseUrl: 'https://api.example.com/v1',
+            api: 'openai-completions',
+            apiKey: '__OPENCLAW_REDACTED__',
+            models: [
+              { id: 'text-model', name: 'Text' },
+              { id: 'vision-model', name: 'Vision' },
+            ],
+          },
+        },
+      },
+    };
+  }
+
+  beforeEach(() => {
+    mockModalConfirm.mockReset();
+    mockMessageSuccess.mockReset();
+    mockMessageError.mockReset();
+    useConfigStore.setState({
+      theme: 'dark',
+      locale: 'en',
+      systemPromptAppend: '',
+      bootState: 'ready',
+      pendingConfigRestart: false,
+      gatewayConfig: null,
+      gatewayConfigLoading: false,
+      _configRetryCount: 0,
+    });
+    useGatewayStore.setState({
+      client: createMockClient(),
+      state: 'connected',
+      serverVersion: '0.7.1',
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('shows the vision URL, protocol Select, and key fields when vision uses a distinct custom profile', () => {
+    useConfigStore.setState({ gatewayConfig: makeSeparateVisionConfig() });
+
+    render(<SettingsPanel />);
+
+    // Vision URL field is visible with the vision provider's own baseUrl
+    expect(screen.getByDisplayValue('https://b.example/v1')).toBeTruthy();
+    // Vision advanced label + protocol field render (text provider is openai → no text protocol Select)
+    expect(screen.getByText('settings.advancedVisionEndpoint')).toBeTruthy();
+    expect(screen.getByText('settings.apiProtocol')).toBeTruthy();
+    // Vision key field label is visible
+    expect(screen.getByText('settings.visionApiKey')).toBeTruthy();
+  });
+
+  it('auto-aligns the vision protocol to anthropic-messages when the vision URL contains /anthropic', () => {
+    useConfigStore.setState({ gatewayConfig: makeSeparateVisionConfig() });
+
+    render(<SettingsPanel />);
+
+    const visionUrlInput = screen.getByDisplayValue('https://b.example/v1');
+    fireEvent.change(visionUrlInput, { target: { value: 'https://relay-b.example/anthropic' } });
+
+    // The vision protocol Select now displays the Anthropic-compatible option label
+    expect(screen.getByText('Anthropic Compatible')).toBeTruthy();
+  });
+
+  it('hides independent vision fields and shows the inherit hint when vision provider equals the text provider', () => {
+    useConfigStore.setState({ gatewayConfig: makeSharedVisionConfig() });
+
+    render(<SettingsPanel />);
+
+    // No independent vision endpoint fields
+    expect(screen.queryByText('settings.advancedVisionEndpoint')).toBeNull();
+    expect(screen.queryByText('settings.visionApiKey')).toBeNull();
+    // The inherit hint is shown
+    expect(screen.getByText('settings.visionInheritsText')).toBeTruthy();
+  });
+
+  /** Text on openai + vision on openai (distinct model) → vision enabled and
+   *  initially inheriting the text provider, with NO custom-* keys in config. */
+  function makeVisionInheritsOpenaiConfig() {
+    return {
+      agents: {
+        defaults: {
+          model: { primary: 'openai/gpt-4o' },
+          imageModel: { primary: 'openai/gpt-4o-vision' },
+        },
+      },
+      models: {
+        providers: {
+          openai: {
+            baseUrl: 'https://api.openai.com/v1',
+            api: 'openai-completions',
+            apiKey: '__OPENCLAW_REDACTED__',
+            models: [
+              { id: 'gpt-4o', name: 'GPT-4o' },
+              { id: 'gpt-4o-vision', name: 'GPT-4o Vision' },
+            ],
+          },
+        },
+      },
+    };
+  }
+
+  it('allocates a vision provider key distinct from an in-flight (unsaved) text custom profile', () => {
+    // Config has no custom-* keys: an in-flight text custom profile the user
+    // just created via "Add custom profile" is NOT yet persisted, so it does
+    // not appear in listApiProfilesFromConfig. The first such profile claims the
+    // bare `custom` slot. When the user then creates a vision custom profile,
+    // a naive allocator that only consulted the config-derived profile set would
+    // re-pick `custom` and overwrite the in-flight text endpoint. The explicit
+    // existingIds.add(provider) guard in beginNewVisionCustomProfile prevents
+    // that collision.
+    useConfigStore.setState({ gatewayConfig: makeVisionInheritsOpenaiConfig() });
+
+    render(<SettingsPanel />);
+
+    const openaiProviderButtons = () =>
+      screen.getAllByRole('button').filter((b) => /^OpenAI/.test(b.textContent ?? ''));
+
+    // Initially both the text and vision provider buttons read "OpenAI".
+    expect(openaiProviderButtons().length).toBe(2);
+
+    // 1) Create an in-flight TEXT custom profile → claims the bare `custom` key,
+    //    which is NOT present in config (so config-listing cannot see it). The
+    //    text provider button is the first of the two OpenAI buttons.
+    fireEvent.click(openaiProviderButtons()[0]);
+    act(() => {
+      fireEvent.click(screen.getByText('providerPicker.addCustomProfile'));
+    });
+
+    // The text provider button now shows the in-flight `custom` key; no `custom-*`
+    // slot exists yet.
+    expect(screen.getAllByText('custom').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/^custom-/)).toBeNull();
+
+    // 2) Create a VISION custom profile. The vision provider still reads OpenAI
+    //    (it was never changed), so it is now the single remaining OpenAI button.
+    const remainingOpenai = openaiProviderButtons();
+    expect(remainingOpenai.length).toBe(1);
+    fireEvent.click(remainingOpenai[0]);
+    act(() => {
+      // The vision picker mounts after the text picker in document order, so the
+      // last "add custom profile" card belongs to the (now open) vision picker.
+      const addCards = screen.getAllByText('providerPicker.addCustomProfile');
+      fireEvent.click(addCards[addCards.length - 1]);
+    });
+
+    // The new vision profile MUST land on a key distinct from the in-flight text
+    // `custom` provider — observable two ways through the public UI:
+    //  (1) the separate vision-endpoint advanced section now renders — it only
+    //      appears when visionProvider !== provider, so a collision back onto
+    //      `custom` would have kept it hidden; and
+    //  (2) a fresh `custom-*` provider key surfaces (the new vision slot) while
+    //      the in-flight text `custom` key is still present, proving the text
+    //      profile was not overwritten by the vision entry.
+    expect(screen.getByText('settings.advancedVisionEndpoint')).toBeTruthy();
+    expect(screen.getAllByText(/^custom-/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('custom').length).toBeGreaterThan(0);
+  });
+});

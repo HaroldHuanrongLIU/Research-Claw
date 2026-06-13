@@ -619,6 +619,8 @@
     "provider": "模型供应商",
     "baseUrl": "API 地址",
     "advancedTextEndpoint": "文本端点模型高级设置",
+    "advancedVisionEndpoint": "视觉端点高级设置",
+    "visionInheritsText": "视觉沿用文本端点。如需独立端点,请选择或新建一个不同的配置。",
     "advancedSupervisor": "质量管控模型高级设置",
     "customApiUrl": "自定义 API 地址",
     "apiProtocol": "API 协议",

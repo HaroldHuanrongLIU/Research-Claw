@@ -169,6 +169,54 @@ describe('buildSaveConfig', () => {
     expect(providers.zai.api).toBe('openai-completions');
   });
 
+  it('writes a separate vision entry under a distinct custom-* key with its own endpoint and key', () => {
+    const config = buildSaveConfig(null, {
+      provider: 'custom-relay-a',
+      baseUrl: 'https://relay-a.example.com/v1',
+      apiKey: 'sk-text',
+      textModel: 'gpt-4o',
+      visionEnabled: true,
+      visionProvider: 'custom-relay-b',
+      visionModel: 'qwen-vl',
+      visionBaseUrl: 'https://relay-b.example.com/v1',
+      visionApiKey: 'sk-vision',
+    });
+
+    const providers = (config.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
+    expect(providers['custom-relay-a']).toBeDefined();
+    expect(providers['custom-relay-b']).toBeDefined();
+    // Vision entry uses its OWN baseUrl, not the text baseUrl
+    expect(providers['custom-relay-b'].baseUrl).toBe('https://relay-b.example.com/v1');
+    expect(providers['custom-relay-a'].baseUrl).toBe('https://relay-a.example.com/v1');
+    // Vision entry uses its OWN key
+    expect(providers['custom-relay-b'].apiKey).toBe('sk-vision');
+    expect(providers['custom-relay-a'].apiKey).toBe('sk-text');
+
+    const defaults = (config.agents as Record<string, unknown>).defaults as Record<string, unknown>;
+    expect((defaults.model as Record<string, string>).primary).toBe('custom-relay-a/gpt-4o');
+    expect((defaults.imageModel as Record<string, string>).primary).toBe('custom-relay-b/qwen-vl');
+  });
+
+  it('does not create a second entry when vision provider equals the text custom-* key', () => {
+    const config = buildSaveConfig(null, {
+      provider: 'custom-relay-a',
+      baseUrl: 'https://relay-a.example.com/v1',
+      apiKey: 'sk-text',
+      textModel: 'gpt-4o',
+      visionEnabled: true,
+      visionProvider: 'custom-relay-a',
+      visionModel: 'qwen-vl',
+    });
+
+    const providers = (config.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
+    // Single entry only — vision inherits the text endpoint
+    expect(Object.keys(providers)).toEqual(['custom-relay-a']);
+    expect(providers['custom-relay-a'].baseUrl).toBe('https://relay-a.example.com/v1');
+
+    const defaults = (config.agents as Record<string, unknown>).defaults as Record<string, unknown>;
+    expect((defaults.imageModel as Record<string, string>).primary).toBe('custom-relay-a/qwen-vl');
+  });
+
   it('routes minimax via local proxy when apiKey is sk-cp-*', () => {
     const config = buildSaveConfig(null, {
       provider: 'minimax',

@@ -619,6 +619,8 @@
     "provider": "Provider",
     "baseUrl": "API Base URL",
     "advancedTextEndpoint": "Text Endpoint Model Advanced",
+    "advancedVisionEndpoint": "Vision Endpoint Advanced",
+    "visionInheritsText": "Vision uses the text endpoint. To use a separate endpoint, pick or create a different configuration.",
     "advancedSupervisor": "Supervisor Model Advanced",
     "customApiUrl": "Custom API URL",
     "apiProtocol": "API Protocol",
