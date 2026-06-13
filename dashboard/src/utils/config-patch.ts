@@ -79,8 +79,6 @@ export interface ConfigPatchInput {
    * stamped contextWindowSource:'manual'.
    */
   customContextWindow?: number;
-  /** Global compaction reserve tokens → agents.defaults.compaction.reserveTokens. */
-  compactionReserveTokens?: number;
   /** Global compaction history cap → agents.defaults.compaction.maxHistoryShare (0.1–0.9). */
   compactionMaxHistoryShare?: number;
 
@@ -132,8 +130,6 @@ export interface ExtractedConfig {
   heartbeatEnabled: boolean;
   /** Current heartbeat interval (e.g. "30m", "1h") */
   heartbeatInterval: string;
-  /** Global agents.defaults.compaction.reserveTokens (undefined when unset). */
-  compactionReserveTokens?: number;
   /** Global agents.defaults.compaction.maxHistoryShare (undefined when unset). */
   compactionMaxHistoryShare?: number;
 }
@@ -197,19 +193,15 @@ export const MAX_HISTORY_SHARE_MAX = 0.9;
 
 export interface ModelTuningInput {
   contextWindow?: number;
-  reserveTokens?: number;
   maxHistoryShare?: number;
 }
 
 export interface ModelTuningIssue {
-  field: 'contextWindow' | 'reserveTokens' | 'maxHistoryShare';
+  field: 'contextWindow' | 'maxHistoryShare';
   /** i18n-mappable reason code. */
   code:
     | 'contextWindow.notInteger'
     | 'contextWindow.outOfRange'
-    | 'reserveTokens.notInteger'
-    | 'reserveTokens.negative'
-    | 'reserveTokens.exceedsWindow'
     | 'maxHistoryShare.outOfRange';
 }
 
@@ -218,32 +210,19 @@ const isFiniteInt = (n: unknown): n is number =>
 
 /**
  * Pure 防蠢 validation for the manual-endpoint tuning knobs. Returns an empty
- * array when valid. The hard constraint is `reserveTokens < contextWindow` — a
- * non-positive usable budget would make the agent compact on turn one (or never
- * progress), reproducing the very "compaction timeout" this feature fixes.
+ * array when valid. The contextWindow is the only value OC cannot infer for a
+ * custom endpoint; reserveTokens is left to OC's own floor so the user cannot
+ * pin a non-positive usable budget — the original "compaction timeout" footgun.
  */
 export function validateModelTuning(input: ModelTuningInput): ModelTuningIssue[] {
   const issues: ModelTuningIssue[] = [];
-  const { contextWindow, reserveTokens, maxHistoryShare } = input;
+  const { contextWindow, maxHistoryShare } = input;
 
   if (contextWindow !== undefined) {
     if (!isFiniteInt(contextWindow)) {
       issues.push({ field: 'contextWindow', code: 'contextWindow.notInteger' });
     } else if (contextWindow < CONTEXT_WINDOW_MIN || contextWindow > CONTEXT_WINDOW_MAX) {
       issues.push({ field: 'contextWindow', code: 'contextWindow.outOfRange' });
-    }
-  }
-
-  if (reserveTokens !== undefined) {
-    if (!isFiniteInt(reserveTokens)) {
-      issues.push({ field: 'reserveTokens', code: 'reserveTokens.notInteger' });
-    } else if (reserveTokens < 0) {
-      issues.push({ field: 'reserveTokens', code: 'reserveTokens.negative' });
-    } else if (
-      isFiniteInt(contextWindow) &&
-      contextWindow - reserveTokens <= 0
-    ) {
-      issues.push({ field: 'reserveTokens', code: 'reserveTokens.exceedsWindow' });
     }
   }
 
@@ -1059,21 +1038,13 @@ export function buildSaveConfig(
   };
 
   // --- Compaction (global; sizes the whole-session preemptive-compaction trigger) ---
-  // Only the two user-facing knobs are merged; existing fields (notably the RC
-  // default mode:'safeguard') are preserved.
-  if (
-    input.compactionReserveTokens !== undefined ||
-    input.compactionMaxHistoryShare !== undefined
-  ) {
+  // Only the history-share knob is user-facing; reserveTokens is left to OC's own
+  // floor. Existing fields (notably the RC default mode:'safeguard') are preserved.
+  if (input.compactionMaxHistoryShare !== undefined) {
     const existingCompaction =
       (existingDefaults?.compaction as Record<string, unknown> | undefined) ?? {};
     const compaction: Record<string, unknown> = { ...existingCompaction };
-    if (input.compactionReserveTokens !== undefined) {
-      compaction.reserveTokens = input.compactionReserveTokens;
-    }
-    if (input.compactionMaxHistoryShare !== undefined) {
-      compaction.maxHistoryShare = input.compactionMaxHistoryShare;
-    }
+    compaction.maxHistoryShare = input.compactionMaxHistoryShare;
     if (compaction.mode === undefined) compaction.mode = 'safeguard';
     defaults.compaction = compaction;
   }
@@ -1319,10 +1290,6 @@ export function extractConfigFields(
 
   // --- Compaction (global) ---
   const compactionDef = defaults?.compaction as Record<string, unknown> | undefined;
-  const compactionReserveTokens =
-    typeof compactionDef?.reserveTokens === 'number'
-      ? (compactionDef.reserveTokens as number)
-      : undefined;
   const compactionMaxHistoryShare =
     typeof compactionDef?.maxHistoryShare === 'number'
       ? (compactionDef.maxHistoryShare as number)
@@ -1353,7 +1320,6 @@ export function extractConfigFields(
     webSearchApiKeyConfigured: typeof webSearchApiKeyRaw === 'string' && webSearchApiKeyRaw.length > 0,
     heartbeatEnabled,
     heartbeatInterval,
-    compactionReserveTokens,
     compactionMaxHistoryShare,
   };
 }

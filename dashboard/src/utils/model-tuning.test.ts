@@ -70,7 +70,7 @@ describe('resolveModelDef — manual contextWindow override', () => {
 describe('validateModelTuning — 防蠢', () => {
   it('passes for a sane tuple', () => {
     expect(
-      validateModelTuning({ contextWindow: 128_000, reserveTokens: 16_384, maxHistoryShare: 0.5 }),
+      validateModelTuning({ contextWindow: 128_000, maxHistoryShare: 0.5 }),
     ).toEqual([]);
   });
 
@@ -93,18 +93,6 @@ describe('validateModelTuning — 防蠢', () => {
   it('accepts the exact bounds', () => {
     expect(validateModelTuning({ contextWindow: CONTEXT_WINDOW_MIN })).toEqual([]);
     expect(validateModelTuning({ contextWindow: CONTEXT_WINDOW_MAX })).toEqual([]);
-  });
-
-  it('enforces reserveTokens < contextWindow (usable budget must stay positive)', () => {
-    const issues = validateModelTuning({ contextWindow: 16_000, reserveTokens: 16_000 });
-    expect(issues.map((i) => i.code)).toContain('reserveTokens.exceedsWindow');
-    expect(validateModelTuning({ contextWindow: 16_000, reserveTokens: 15_999 })).toEqual([]);
-  });
-
-  it('rejects a negative reserveTokens', () => {
-    expect(validateModelTuning({ reserveTokens: -1 }).map((i) => i.code)).toContain(
-      'reserveTokens.negative',
-    );
   });
 
   it('keeps maxHistoryShare within OC range 0.1–0.9', () => {
@@ -149,15 +137,15 @@ describe('buildSaveConfig — manual window + global compaction (拉通)', () =>
     expect(card.contextWindow).not.toBe(999_999);
   });
 
-  it('writes global compaction knobs and preserves mode:safeguard', () => {
+  it('writes the global history-share knob and preserves mode:safeguard', () => {
     const cfg = buildSaveConfig(
       null,
-      baseInput({ compactionReserveTokens: 24_000, compactionMaxHistoryShare: 0.6 }),
+      baseInput({ compactionMaxHistoryShare: 0.6 }),
     );
     const compaction = (
       (cfg.agents as { defaults: { compaction: Record<string, unknown> } }).defaults.compaction
     );
-    expect(compaction.reserveTokens).toBe(24_000);
+    expect(compaction.reserveTokens).toBeUndefined();
     expect(compaction.maxHistoryShare).toBe(0.6);
     expect(compaction.mode).toBe('safeguard');
   });
@@ -175,7 +163,7 @@ describe('buildSaveConfig — manual window + global compaction (拉通)', () =>
     // Use an id OC knows under another provider so an auto card WOULD be re-aligned.
     const cfg = buildSaveConfig(
       null,
-      baseInput({ textModel: 'gpt-5.4', customContextWindow: 64_000, compactionReserveTokens: 20_000, compactionMaxHistoryShare: 0.5 }),
+      baseInput({ textModel: 'gpt-5.4', customContextWindow: 64_000, compactionMaxHistoryShare: 0.5 }),
     );
 
     // Startup aligner must not touch the manual card.
@@ -187,7 +175,6 @@ describe('buildSaveConfig — manual window + global compaction (拉通)', () =>
     expect(providerFields?.contextWindowManual).toBe(true);
 
     const fields = extractConfigFields(aligned);
-    expect(fields.compactionReserveTokens).toBe(20_000);
     expect(fields.compactionMaxHistoryShare).toBe(0.5);
   });
 

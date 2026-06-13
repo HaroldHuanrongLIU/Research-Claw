@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, within } from '@testing-library/react';
 import React from 'react';
 import SettingsPanel from './SettingsPanel';
 import { useConfigStore } from '../../stores/config';
@@ -79,9 +79,19 @@ function createMockClient(requestFn?: (...args: unknown[]) => Promise<unknown>) 
 }
 
 function clickConfigSaveButton(): void {
-  const saveButtons = screen.getAllByRole('button', { name: /settings\.save|setup\.gatewayRestarting/i });
+  const saveButtons = screen.getAllByRole('button', { name: /settings\.(save|apply)|setup\.gatewayRestarting/i });
   const configButton = saveButtons.find((button) => button.parentElement?.textContent?.includes('settings.restartHint')) ?? saveButtons[0];
   fireEvent.click(configButton);
+}
+
+/** The footer Save/Apply button (label is dynamic), located via its sibling restart hint. */
+function getConfigActionButton(): HTMLButtonElement {
+  const candidates = screen
+    .getAllByRole('button')
+    .filter((b) => /settings\.(save|apply)|setup\.gatewayRestarting/.test(b.textContent ?? ''));
+  const btn =
+    candidates.find((b) => b.parentElement?.textContent?.includes('settings.restartHint')) ?? candidates[0];
+  return btn as HTMLButtonElement;
 }
 
 describe('SettingsPanel', () => {
@@ -155,6 +165,53 @@ describe('SettingsPanel', () => {
     render(<SettingsPanel />);
     // The primary model label should be visible
     expect(screen.getByText('settings.primaryModel')).toBeTruthy();
+  });
+});
+
+// ============================================================
+// Footer save hints — bullet list + color
+// ============================================================
+
+describe('Footer save hints — bullet list + color', () => {
+  beforeEach(() => {
+    mockModalConfirm.mockReset();
+    mockMessageSuccess.mockReset();
+    mockMessageError.mockReset();
+    useConfigStore.setState({
+      theme: 'dark',
+      locale: 'en',
+      systemPromptAppend: '',
+      bootState: 'ready',
+      pendingConfigRestart: false,
+      gatewayConfig: null,
+      gatewayConfigLoading: false,
+      _configRetryCount: 0,
+    });
+    useGatewayStore.setState({ state: 'connected', client: createMockClient(), serverVersion: '0.42.0' });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('renders the missing-key hint as a red (danger) bullet while the restart hint stays neutral', () => {
+    // makeGatewayConfig() omits apiKey → provider reports "no API key configured".
+    useConfigStore.setState({ gatewayConfig: makeGatewayConfig() });
+    render(<SettingsPanel />);
+
+    // Restart hint is neutral (secondary), never danger.
+    const restart = screen.getByText('settings.restartHint');
+    expect(restart.className).toContain('ant-typography-secondary');
+    expect(restart.className).not.toContain('ant-typography-danger');
+
+    // The footer renders the missing-key status as a danger (red) element.
+    const dangerMissing = screen
+      .getAllByText('settings.apiKeyMissing')
+      .find((el) => el.className.includes('ant-typography-danger'));
+    expect(dangerMissing).toBeTruthy();
+
+    // Hints are bulleted — at least the restart + missing-key bullets are present.
+    expect(screen.getAllByText('•').length).toBeGreaterThanOrEqual(2);
   });
 });
 
@@ -1051,19 +1108,26 @@ describe('Vision independent endpoint + protocol auto-align', () => {
 
     render(<SettingsPanel />);
 
+    // Vision key field label is visible (top-level, outside the advanced Collapse)
+    expect(screen.getByText('settings.visionApiKey')).toBeTruthy();
+    // Vision advanced section is collapsed by default; its header still renders.
+    expect(screen.getByText('settings.advancedVisionEndpoint')).toBeTruthy();
+    // Expand it to reveal the URL + protocol fields.
+    fireEvent.click(screen.getByText('settings.advancedVisionEndpoint'));
+
     // Vision URL field is visible with the vision provider's own baseUrl
     expect(screen.getByDisplayValue('https://b.example/v1')).toBeTruthy();
-    // Vision advanced label + protocol field render (text provider is openai → no text protocol Select)
-    expect(screen.getByText('settings.advancedVisionEndpoint')).toBeTruthy();
+    // Protocol field renders (text provider is openai → no text protocol Select)
     expect(screen.getByText('settings.apiProtocol')).toBeTruthy();
-    // Vision key field label is visible
-    expect(screen.getByText('settings.visionApiKey')).toBeTruthy();
   });
 
   it('auto-aligns the vision protocol to anthropic-messages when the vision URL contains /anthropic', () => {
     useConfigStore.setState({ gatewayConfig: makeSeparateVisionConfig() });
 
     render(<SettingsPanel />);
+
+    // Vision advanced (URL + protocol) is collapsed by default — expand it first.
+    fireEvent.click(screen.getByText('settings.advancedVisionEndpoint'));
 
     const visionUrlInput = screen.getByDisplayValue('https://b.example/v1');
     fireEvent.change(visionUrlInput, { target: { value: 'https://relay-b.example/anthropic' } });
@@ -1181,6 +1245,11 @@ describe('Protocol probe (Test button) — text endpoint', () => {
   /** Open the text endpoint advanced Collapse so the protocol Select + Test button render. */
   function openTextAdvanced() {
     fireEvent.click(screen.getByText('settings.advancedTextEndpoint'));
+  }
+
+  /** Open the vision endpoint advanced Collapse so its protocol Select + Test button render. */
+  function openVisionAdvanced() {
+    fireEvent.click(screen.getByText('settings.advancedVisionEndpoint'));
   }
 
   /** Type a key into the text endpoint API key input so probes are allowed.
@@ -1356,6 +1425,7 @@ describe('Protocol probe (Test button) — text endpoint', () => {
 
     render(<SettingsPanel />);
     openTextAdvanced();
+    openVisionAdvanced();
 
     // Provide keys for both endpoints so their Test buttons are enabled.
     const keyInputs = screen.getAllByPlaceholderText('setup.apiKeyPlaceholder');
@@ -1392,5 +1462,140 @@ describe('Protocol probe (Test button) — text endpoint', () => {
     openTextAdvanced();
 
     expect(getTextTestButton().disabled).toBe(true);
+  });
+});
+
+describe('Config picker — re-select guard, draft card, Apply/Save label', () => {
+  /** Text endpoint config with one or more saved custom profiles, vision OFF. */
+  function makeProfilesConfig(extra?: Record<string, Record<string, unknown>>) {
+    return {
+      agents: { defaults: { model: { primary: 'custom/m1' } } },
+      models: {
+        providers: {
+          custom: { baseUrl: 'https://a.example/v1', api: 'openai-completions', models: [{ id: 'm1', name: 'm1' }] },
+          ...(extra ?? {}),
+        },
+      },
+    } as unknown as ReturnType<typeof makeGatewayConfig>;
+  }
+
+  /** Open the text provider picker by clicking its trigger (text ends with the provider id). */
+  function openProviderPicker(providerId: string) {
+    const btn = screen.getAllByRole('button').find((b) => (b.textContent ?? '').endsWith(providerId));
+    act(() => {
+      fireEvent.click(btn as HTMLButtonElement);
+    });
+  }
+
+  /** Click a card inside the open picker dialog by its visible text. */
+  function clickPickerItem(text: string) {
+    const dialog = screen.getByRole('dialog');
+    act(() => {
+      fireEvent.click(within(dialog).getAllByText(text)[0]);
+    });
+  }
+
+  beforeEach(() => {
+    // Auto-confirm the "non-recommended provider" caution so selections proceed.
+    mockModalConfirm.mockReset();
+    mockModalConfirm.mockImplementation((cfg: { onOk?: () => void }) => cfg.onOk?.());
+    mockMessageSuccess.mockReset();
+    mockMessageError.mockReset();
+    mockMessageWarning.mockReset();
+    useConfigStore.setState({
+      theme: 'dark',
+      locale: 'en',
+      systemPromptAppend: '',
+      bootState: 'ready',
+      pendingConfigRestart: false,
+      gatewayConfig: null,
+      gatewayConfigLoading: false,
+      _configRetryCount: 0,
+    });
+    useGatewayStore.setState({ client: createMockClient(), state: 'connected', serverVersion: '0.7.1' });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // Fix #1
+  it('re-selecting the already-active provider does not dirty the form (Save stays disabled)', () => {
+    useConfigStore.setState({ gatewayConfig: makeProfilesConfig() });
+    render(<SettingsPanel />);
+
+    // Not dirty on load → footer button disabled.
+    expect(getConfigActionButton().disabled).toBe(true);
+
+    openProviderPicker('custom');
+    clickPickerItem('custom'); // re-pick the current provider → no-op guard
+
+    expect(getConfigActionButton().disabled).toBe(true);
+  });
+
+  // Fix #2
+  it('shows an unsaved-draft card in the picker after clicking "Add custom profile"', () => {
+    useConfigStore.setState({ gatewayConfig: makeProfilesConfig() });
+    render(<SettingsPanel />);
+
+    // The provider trigger node persists across re-renders — reuse it to re-open the picker
+    // without depending on the auto-allocated draft id.
+    const trigger = screen
+      .getAllByRole('button')
+      .find((b) => (b.textContent ?? '').endsWith('custom')) as HTMLButtonElement;
+
+    act(() => fireEvent.click(trigger));
+    clickPickerItem('providerPicker.addCustomProfile'); // closes picker, creates a custom-* draft
+    act(() => fireEvent.click(trigger)); // re-open
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('providerPicker.unsavedDraft')).toBeTruthy();
+    // A distinct draft card (id custom-*) is now listed alongside the saved `custom`.
+    expect(within(dialog).getByText(/^custom-/)).toBeTruthy();
+  });
+
+  // Fix #3 (a)
+  it('labels the footer button "Apply" when switching to another saved profile', () => {
+    useConfigStore.setState({
+      gatewayConfig: makeProfilesConfig({
+        'custom-2': { baseUrl: 'https://b.example/v1', api: 'openai-completions', models: [{ id: 'm2', name: 'm2' }] },
+      }),
+    });
+    render(<SettingsPanel />);
+
+    openProviderPicker('custom');
+    clickPickerItem('custom-2'); // switch to the other already-saved profile
+
+    const btn = getConfigActionButton();
+    expect(btn.disabled).toBe(false);
+    expect(btn.textContent).toContain('settings.apply');
+  });
+
+  // Fix #3 (b)
+  it('labels the footer button "Save" for a brand-new draft profile', () => {
+    useConfigStore.setState({ gatewayConfig: makeProfilesConfig() });
+    render(<SettingsPanel />);
+
+    openProviderPicker('custom');
+    clickPickerItem('providerPicker.addCustomProfile'); // new draft → not a saved config
+
+    const btn = getConfigActionButton();
+    expect(btn.disabled).toBe(false);
+    expect(btn.textContent).toContain('settings.save');
+    expect(btn.textContent).not.toContain('settings.apply');
+  });
+
+  // Fix #3 (c)
+  it('labels the footer button "Save" when editing the active provider without switching', () => {
+    useConfigStore.setState({ gatewayConfig: makeProfilesConfig() });
+    render(<SettingsPanel />);
+
+    const keyInput = screen.getByPlaceholderText('setup.apiKeyPlaceholder');
+    fireEvent.change(keyInput, { target: { value: 'sk-edited' } });
+
+    const btn = getConfigActionButton();
+    expect(btn.disabled).toBe(false);
+    expect(btn.textContent).toContain('settings.save');
+    expect(btn.textContent).not.toContain('settings.apply');
   });
 });

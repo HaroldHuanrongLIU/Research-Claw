@@ -135,7 +135,7 @@ export function providerLabel(id: string, t: (key: string) => string): string {
   return preset.id === 'custom' ? t('setup.providerCustom') : preset.label;
 }
 
-export type SavedCustomProfileOption = { id: string; label: string };
+export type SavedCustomProfileOption = { id: string; label: string; unsaved?: boolean };
 
 export default function ProviderPickerModal({
   open,
@@ -223,6 +223,7 @@ export default function ProviderPickerModal({
       >
         {items.map((p) => {
           const selected = p.id === value;
+          const unsaved = !!p.unsaved;
           return (
             <Card
               key={p.id}
@@ -231,8 +232,12 @@ export default function ProviderPickerModal({
               onClick={() => handleSelect(p.id)}
               style={{
                 cursor: 'pointer',
-                border: selected ? '1px solid var(--accent-primary)' : '1px solid var(--border)',
-                background: selected ? 'rgba(96,165,250,0.08)' : 'var(--surface-hover)',
+                border: unsaved
+                  ? '1px dashed var(--accent-primary)'
+                  : selected
+                    ? '1px solid var(--accent-primary)'
+                    : '1px solid var(--border)',
+                background: selected || unsaved ? 'rgba(96,165,250,0.08)' : 'var(--surface-hover)',
               }}
               styles={{ body: { padding: 12 } }}
             >
@@ -245,11 +250,15 @@ export default function ProviderPickerModal({
                     {p.id}
                   </Text>
                 </div>
-                {selected && (
+                {unsaved ? (
+                  <div style={{ color: 'var(--accent-primary)', fontSize: 11, flexShrink: 0 }}>
+                    {t('providerPicker.unsavedDraft')}
+                  </div>
+                ) : selected ? (
                   <div style={{ color: 'var(--accent-primary)', fontSize: 12, flexShrink: 0 }}>
                     {t('providerPicker.selected')}
                   </div>
-                )}
+                ) : null}
               </div>
             </Card>
           );

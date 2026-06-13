@@ -16,7 +16,7 @@ import {
 } from 'antd';
 import { CloudDownloadOutlined, CopyOutlined, KeyOutlined, PoweroffOutlined, QuestionCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import OAuthModal from '../OAuthModal';
-import ProviderPickerModal, { providerLabel } from '../providers/ProviderPickerModal';
+import ProviderPickerModal, { providerLabel, type SavedCustomProfileOption } from '../providers/ProviderPickerModal';
 import ApiProfilesSection from '../settings/ApiProfilesSection';
 import { useTranslation } from 'react-i18next';
 import { useConfigStore } from '../../stores/config';
@@ -78,11 +78,35 @@ function SettingRow({
   label,
   description,
   children,
+  vertical = false,
 }: {
   label: React.ReactNode;
   description?: string;
   children: React.ReactNode;
+  vertical?: boolean;
 }) {
+  const labelBlock = (
+    <div style={{ flex: vertical ? undefined : 1, minWidth: 0 }}>
+      <Text style={{ fontSize: 13 }}>{label}</Text>
+      {description && (
+        <div>
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            {description}
+          </Text>
+        </div>
+      )}
+    </div>
+  );
+  if (vertical) {
+    // Stacked layout: label on top, full-width control below. Used in the
+    // advanced endpoint sections where long labels would crush a side control.
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', padding: '10px 0', gap: 6 }}>
+        {labelBlock}
+        <div style={{ width: '100%', minWidth: 0 }}>{children}</div>
+      </div>
+    );
+  }
   return (
     <div
       style={{
@@ -93,16 +117,7 @@ function SettingRow({
         gap: 16,
       }}
     >
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <Text style={{ fontSize: 13 }}>{label}</Text>
-        {description && (
-          <div>
-            <Text type="secondary" style={{ fontSize: 11 }}>
-              {description}
-            </Text>
-          </div>
-        )}
-      </div>
+      {labelBlock}
       <div style={{ flexShrink: 0 }}>{children}</div>
     </div>
   );
@@ -495,7 +510,6 @@ export default function SettingsPanel() {
   // text contextWindow + the global compaction knobs that size the whole-session
   // preemptive-compaction trigger. null = leave to OC/preset defaults.
   const [customContextWindow, setCustomContextWindow] = useState<number | null>(null);
-  const [compactionReserveTokens, setCompactionReserveTokens] = useState<number | null>(null);
   const [compactionMaxHistoryShare, setCompactionMaxHistoryShare] = useState<number | null>(null);
 
   // --- Supervisor (dual-model) ---
@@ -727,12 +741,15 @@ export default function SettingsPanel() {
 
   const pendingRestart = useConfigStore((s) => s.pendingConfigRestart);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [visionAdvancedOpen, setVisionAdvancedOpen] = useState(true);
+  const [visionAdvancedOpen, setVisionAdvancedOpen] = useState(false);
 
   // Dirty tracking: the Save button stays disabled until a config-class field
   // diverges from the last config-driven snapshot. UI-only prefs (showSystemFiles,
   // notificationSoundEnabled) persist instantly and are intentionally excluded.
   const [configBaseline, setConfigBaseline] = useState<string | null>(null);
+  // The active text provider captured at the last config-driven hydration — lets the
+  // footer button distinguish "switch to an existing config (Apply)" from "save edits".
+  const [baselineProvider, setBaselineProvider] = useState<string | null>(null);
   const [baselineTick, setBaselineTick] = useState(0);
   const supervisorBaselinedRef = useRef(false);
   const [systemPromptOpen, setSystemPromptOpen] = useState(false);
@@ -800,11 +817,14 @@ export default function SettingsPanel() {
   );
   const formSignatureRef = useRef(formSignature);
   formSignatureRef.current = formSignature;
+  const providerSnapshotRef = useRef(provider);
+  providerSnapshotRef.current = provider;
 
   // Re-baseline only after a genuine config-driven hydration (baselineTick bump),
   // never on user edits — so the dirty flag survives reconnects with pending edits.
   useEffect(() => {
     setConfigBaseline(formSignatureRef.current);
+    setBaselineProvider(providerSnapshotRef.current);
   }, [baselineTick]);
 
   const isDirty = configBaseline !== null && formSignature !== configBaseline;
@@ -1038,10 +1058,32 @@ export default function SettingsPanel() {
     setProfileLabel(profile.label);
   }, [handleProviderChange]);
 
-  const savedCustomProfileOptions = useMemo(
-    () => apiProfiles.map((p) => ({ id: p.id, label: p.label })),
-    [apiProfiles],
-  );
+  const savedCustomProfileOptions = useMemo<SavedCustomProfileOption[]>(() => {
+    const opts: SavedCustomProfileOption[] = apiProfiles.map((p) => ({ id: p.id, label: p.label }));
+    const known = new Set(opts.map((o) => o.id));
+    // Surface an in-flight (just-created, not-yet-saved) custom profile as a distinct
+    // draft card so it doesn't read as "nothing selected" in the picker.
+    const appendDraft = (id: string, liveLabel?: string) => {
+      if (!isApiProfileProviderKey(id) || known.has(id)) return;
+      known.add(id);
+      opts.push({
+        id,
+        label: liveLabel || profileLabelRef.current[id] || profileIdToDisplayName(id) || id,
+        unsaved: true,
+      });
+    };
+    appendDraft(provider, profileLabel);
+    appendDraft(visionProvider);
+    return opts;
+  }, [apiProfiles, provider, visionProvider, profileLabel]);
+
+  // "Apply" vs "Save": switching the active provider to another *already-saved* config
+  // (preset / OAuth / persisted profile) is an activation, not new data → label it Apply.
+  // New drafts and field edits stay "Save".
+  const switchedActiveProvider = baselineProvider !== null && provider !== baselineProvider;
+  const targetProviderIsSaved =
+    !isApiProfileProviderKey(provider) || apiProfiles.some((p) => p.id === provider);
+  const isApplyAction = isDirty && switchedActiveProvider && targetProviderIsSaved;
 
   const beginNewCustomProfile = useCallback(() => {
     const cfg = projectConfigCacheRef.current ?? (gatewayConfig as unknown as Record<string, unknown> | null);
@@ -1242,7 +1284,6 @@ export default function SettingsPanel() {
     setHeartbeatInterval(fields.heartbeatInterval);
 
     // Global compaction knobs.
-    setCompactionReserveTokens(fields.compactionReserveTokens ?? null);
     setCompactionMaxHistoryShare(fields.compactionMaxHistoryShare ?? null);
     // Per-text-provider manual window (prefill only when pinned).
     const textProviderFields = extractProviderFieldsForEditor(configForEditor, fields.provider);
@@ -1383,7 +1424,6 @@ export default function SettingsPanel() {
       if (manualEndpoint) {
         const tuningIssues = validateModelTuning({
           contextWindow: customContextWindow ?? undefined,
-          reserveTokens: compactionReserveTokens ?? undefined,
           maxHistoryShare: compactionMaxHistoryShare ?? undefined,
         });
         if (tuningIssues.length > 0) {
@@ -1400,7 +1440,6 @@ export default function SettingsPanel() {
           apiKey: apiKeyToSend,
           textModel: textModel.trim(),
           customContextWindow: manualEndpoint ? customContextWindow ?? undefined : undefined,
-          compactionReserveTokens: manualEndpoint ? compactionReserveTokens ?? undefined : undefined,
           compactionMaxHistoryShare: manualEndpoint ? compactionMaxHistoryShare ?? undefined : undefined,
           visionEnabled,
           visionProvider: visionEnabled ? visionProvider : undefined,
@@ -1477,7 +1516,7 @@ export default function SettingsPanel() {
     } finally {
       setSaving(false);
     }
-  }, [baseUrl, api, apiKey, provider, textModel, customContextWindow, compactionReserveTokens, compactionMaxHistoryShare, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, heartbeatEnabled, heartbeatInterval, supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel, reviewMode, appendReviewToChannelOutput, deviationThreshold, forceRegenerate, maxRegenerateAttempts, t, refreshAuthStatuses, supportsAuthProfiles]);
+  }, [baseUrl, api, apiKey, provider, textModel, customContextWindow, compactionMaxHistoryShare, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, heartbeatEnabled, heartbeatInterval, supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel, reviewMode, appendReviewToChannelOutput, deviationThreshold, forceRegenerate, maxRegenerateAttempts, t, refreshAuthStatuses, supportsAuthProfiles]);
 
   const applyConfigFieldsToForm = useCallback((configForEditor: Record<string, unknown>) => {
     const fields = extractConfigFields(configForEditor);
@@ -1750,6 +1789,8 @@ export default function SettingsPanel() {
             }}
             onSelect={(id) => {
               setProviderPickerOpen(false);
+              // Re-selecting the already-active provider is a no-op — never dirty the form.
+              if (id === provider) return;
               if (isApiProfileProviderKey(id)) {
                 const p = apiProfiles.find((x) => x.id === id);
                 if (p) {
@@ -1882,8 +1923,8 @@ export default function SettingsPanel() {
             label: t('settings.advancedTextEndpoint'),
             children: (
               <>
-                <SettingRow label={t('settings.customApiUrl')}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 220 }}>
+                <SettingRow label={t('settings.customApiUrl')} vertical>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
                     <Input
                       value={baseUrl}
                       onChange={(e) => {
@@ -1892,7 +1933,7 @@ export default function SettingsPanel() {
                         setProbeResult((prev) => ({ ...prev, text: undefined }));
                       }}
                       size="small"
-                      style={{ width: 220 }}
+                      style={{ width: '100%' }}
                       placeholder="https://api.openai.com/v1"
                       disabled={probing === 'text'}
                     />
@@ -1905,8 +1946,8 @@ export default function SettingsPanel() {
                 </SettingRow>
 
                 {isApiProfileProviderKey(provider) && (
-                  <SettingRow label={t('settings.apiProtocol')}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 220 }}>
+                  <SettingRow label={t('settings.apiProtocol')} vertical>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                         <Select
                           value={api}
@@ -1962,30 +2003,14 @@ export default function SettingsPanel() {
                     <SettingRow
                       label={t('settings.tuning.contextWindow')}
                       description={t('settings.tuning.contextWindowHint')}
+                      vertical
                     >
                       <InputNumber
                         value={customContextWindow}
                         onChange={(v) => setCustomContextWindow(typeof v === 'number' ? v : null)}
                         size="small"
-                        style={{ width: 220 }}
+                        style={{ width: '100%' }}
                         min={CONTEXT_WINDOW_MIN}
-                        max={CONTEXT_WINDOW_MAX}
-                        step={1024}
-                        precision={0}
-                        placeholder={t('settings.tuning.autoPlaceholder')}
-                      />
-                    </SettingRow>
-
-                    <SettingRow
-                      label={t('settings.tuning.reserveTokens')}
-                      description={t('settings.tuning.compactionGlobalHint')}
-                    >
-                      <InputNumber
-                        value={compactionReserveTokens}
-                        onChange={(v) => setCompactionReserveTokens(typeof v === 'number' ? v : null)}
-                        size="small"
-                        style={{ width: 220 }}
-                        min={0}
                         max={CONTEXT_WINDOW_MAX}
                         step={1024}
                         precision={0}
@@ -1996,12 +2021,13 @@ export default function SettingsPanel() {
                     <SettingRow
                       label={t('settings.tuning.maxHistoryShare')}
                       description={t('settings.tuning.maxHistoryShareHint')}
+                      vertical
                     >
                       <InputNumber
                         value={compactionMaxHistoryShare}
                         onChange={(v) => setCompactionMaxHistoryShare(typeof v === 'number' ? v : null)}
                         size="small"
-                        style={{ width: 220 }}
+                        style={{ width: '100%' }}
                         min={MAX_HISTORY_SHARE_MIN}
                         max={MAX_HISTORY_SHARE_MAX}
                         step={0.05}
@@ -2052,6 +2078,7 @@ export default function SettingsPanel() {
                 }}
                 onSelect={(id) => {
                   setVisionProviderPickerOpen(false);
+                  if (id === visionProvider) return;
                   handleVisionProviderChange(id);
                 }}
                 onClose={() => setVisionProviderPickerOpen(false)}
@@ -2155,8 +2182,8 @@ export default function SettingsPanel() {
                   label: t('settings.advancedVisionEndpoint', { defaultValue: 'Vision Endpoint Advanced' }),
                   children: (
             <>
-              <SettingRow label={t('settings.visionBaseUrl')}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 220 }}>
+              <SettingRow label={t('settings.visionBaseUrl')} vertical>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
                   <Input
                     value={visionBaseUrl}
                     onChange={(e) => {
@@ -2165,7 +2192,7 @@ export default function SettingsPanel() {
                       setProbeResult((prev) => ({ ...prev, vision: undefined }));
                     }}
                     size="small"
-                    style={{ width: 220 }}
+                    style={{ width: '100%' }}
                     placeholder="https://api.openai.com/v1"
                     disabled={probing === 'vision'}
                   />
@@ -2178,8 +2205,8 @@ export default function SettingsPanel() {
               </SettingRow>
 
               {isApiProfileProviderKey(visionProvider) && (
-                <SettingRow label={t('settings.apiProtocol')}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 220 }}>
+                <SettingRow label={t('settings.apiProtocol')} vertical>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                       <Select
                         value={visionApi}
@@ -2401,6 +2428,7 @@ export default function SettingsPanel() {
                     includeProviderIds={[...SUPERVISOR_REVIEWER_PROVIDER_IDS]}
                     onSelect={(id) => {
                       setSupervisorProviderPickerOpen(false);
+                      if (id === supervisorProvider) return;
                       handleSupervisorProviderChange(id);
                     }}
                     onClose={() => setSupervisorProviderPickerOpen(false)}
@@ -2754,16 +2782,40 @@ export default function SettingsPanel() {
         }}
       >
         <div style={{ flex: 1, minWidth: 0 }}>
-          <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
-            {t('settings.restartHint')}
-          </Text>
-          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
-            {textApiKeyStatus}
-            {visionApiKeyStatus ? ` · ${visionApiKeyStatus}` : ''}
-          </Text>
+          {(() => {
+            const dualEndpoint = visionEnabled && visionSeparateProvider;
+            const hints: { text: string; tone: 'neutral' | 'warn' }[] = [
+              { text: t('settings.restartHint'), tone: 'neutral' },
+            ];
+            if (textApiKeyStatus) {
+              hints.push({
+                text: dualEndpoint ? `${t('settings.primaryModel')}: ${textApiKeyStatus}` : textApiKeyStatus,
+                tone: 'warn',
+              });
+            }
+            if (visionApiKeyStatus) {
+              hints.push({ text: `${t('settings.visionModel')}: ${visionApiKeyStatus}`, tone: 'warn' });
+            }
+            return hints.map((h, i) => (
+              <div
+                key={i}
+                style={{ display: 'flex', gap: 4, alignItems: 'flex-start', marginTop: i === 0 ? 0 : 2 }}
+              >
+                <Text
+                  type={h.tone === 'warn' ? 'danger' : 'secondary'}
+                  style={{ fontSize: 11, lineHeight: '16px', flexShrink: 0 }}
+                >
+                  •
+                </Text>
+                <Text type={h.tone === 'warn' ? 'danger' : 'secondary'} style={{ fontSize: 11, lineHeight: '16px' }}>
+                  {h.text}
+                </Text>
+              </div>
+            ));
+          })()}
         </div>
         <Button type="primary" size="small" onClick={handleSave} loading={saving || pendingRestart} disabled={pendingRestart || !isDirty || probing !== null} style={{ flexShrink: 0 }}>
-          {pendingRestart ? t('setup.gatewayRestarting') : t('settings.save')}
+          {pendingRestart ? t('setup.gatewayRestarting') : isApplyAction ? t('settings.apply') : t('settings.save')}
         </Button>
       </div>
     </div>
