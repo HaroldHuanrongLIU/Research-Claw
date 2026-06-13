@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { PROVIDER_PRESETS } from '../../utils/provider-presets';
 import { isOAuthProvider } from '../../utils/oauth-providers';
 import { providerIdsForPicker } from '../../utils/provider-variants';
+import { UNSAVED_PROFILE_BORDER, UNSAVED_PROFILE_BG } from '../settings/api-profile-card-style';
 
 const { Text } = Typography;
 
@@ -233,11 +234,11 @@ export default function ProviderPickerModal({
               style={{
                 cursor: 'pointer',
                 border: unsaved
-                  ? '1px dashed var(--accent-primary)'
+                  ? UNSAVED_PROFILE_BORDER
                   : selected
                     ? '1px solid var(--accent-primary)'
                     : '1px solid var(--border)',
-                background: selected || unsaved ? 'rgba(96,165,250,0.08)' : 'var(--surface-hover)',
+                background: selected || unsaved ? UNSAVED_PROFILE_BG : 'var(--surface-hover)',
               }}
               styles={{ body: { padding: 12 } }}
             >

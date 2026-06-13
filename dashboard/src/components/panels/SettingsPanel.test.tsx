@@ -1598,4 +1598,22 @@ describe('Config picker — re-select guard, draft card, Apply/Save label', () =
     expect(btn.textContent).toContain('settings.save');
     expect(btn.textContent).not.toContain('settings.apply');
   });
+
+  // Inline list ↔ picker parity: a draft created from the inline "Add" button
+  // surfaces as an unsaved card in the inline profile list (same source as the picker).
+  it('surfaces the just-added draft as an unsaved card in the inline profile list', () => {
+    useConfigStore.setState({ gatewayConfig: makeProfilesConfig() });
+    render(<SettingsPanel />);
+
+    // No draft marker before adding.
+    expect(screen.queryByText('providerPicker.unsavedDraft')).toBeNull();
+
+    const addBtn = screen
+      .getAllByRole('button')
+      .find((b) => (b.textContent ?? '').includes('settings.apiProfilesAdd')) as HTMLButtonElement;
+    act(() => fireEvent.click(addBtn));
+
+    // The inline list now renders the draft with the shared unsaved marker.
+    expect(screen.getAllByText('providerPicker.unsavedDraft').length).toBeGreaterThan(0);
+  });
 });

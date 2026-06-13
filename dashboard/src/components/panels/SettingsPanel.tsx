@@ -47,6 +47,7 @@ import {
   listApiProfilesFromConfig,
   profileIdToDisplayName,
   type ApiProfile,
+  type ApiProfileEntry,
 } from '../../utils/api-profiles';
 import { PROVIDER_PRESETS, detectPresetFromProvider, getPreset, inferApiFromUrl, protocolProbeOrder, type ApiProtocol } from '../../utils/provider-presets';
 import { isOAuthProvider } from '../../utils/oauth-providers';
@@ -1058,24 +1059,70 @@ export default function SettingsPanel() {
     setProfileLabel(profile.label);
   }, [handleProviderChange]);
 
-  const savedCustomProfileOptions = useMemo<SavedCustomProfileOption[]>(() => {
-    const opts: SavedCustomProfileOption[] = apiProfiles.map((p) => ({ id: p.id, label: p.label }));
-    const known = new Set(opts.map((o) => o.id));
-    // Surface an in-flight (just-created, not-yet-saved) custom profile as a distinct
-    // draft card so it doesn't read as "nothing selected" in the picker.
-    const appendDraft = (id: string, liveLabel?: string) => {
+  // Single source of truth for the profile list shared by the inline section and
+  // the provider picker: persisted profiles + any in-flight (just-created,
+  // not-yet-saved) draft, so a draft appears consistently in both surfaces.
+  const profileEntries = useMemo<ApiProfileEntry[]>(() => {
+    const entries: ApiProfileEntry[] = apiProfiles.map((p) => ({ ...p, unsaved: false }));
+    const known = new Set(entries.map((e) => e.id));
+    const appendDraft = (
+      id: string,
+      fields: { label?: string; baseUrl: string; api: string; modelId: string; apiKeyConfigured: boolean },
+    ) => {
       if (!isApiProfileProviderKey(id) || known.has(id)) return;
       known.add(id);
-      opts.push({
+      entries.push({
         id,
-        label: liveLabel || profileLabelRef.current[id] || profileIdToDisplayName(id) || id,
+        label: fields.label || profileLabelRef.current[id] || profileIdToDisplayName(id) || id,
+        baseUrl: fields.baseUrl,
+        api: fields.api,
+        modelId: fields.modelId,
+        apiKeyConfigured: fields.apiKeyConfigured,
+        isActive: false,
+        isBuiltin: false,
+        requiresApiKey: true,
         unsaved: true,
       });
     };
-    appendDraft(provider, profileLabel);
-    appendDraft(visionProvider);
-    return opts;
-  }, [apiProfiles, provider, visionProvider, profileLabel]);
+    appendDraft(provider, {
+      label: profileLabel,
+      baseUrl,
+      api,
+      modelId: textModel,
+      apiKeyConfigured: apiKeyConfigured || apiKey.trim().length > 0,
+    });
+    if (visionEnabled && visionSeparateProvider) {
+      appendDraft(visionProvider, {
+        baseUrl: visionBaseUrl,
+        api: visionApi,
+        modelId: visionModel,
+        apiKeyConfigured: visionApiKeyConfigured || visionApiKey.trim().length > 0,
+      });
+    }
+    return entries;
+  }, [
+    apiProfiles,
+    provider,
+    profileLabel,
+    baseUrl,
+    api,
+    textModel,
+    apiKey,
+    apiKeyConfigured,
+    visionEnabled,
+    visionSeparateProvider,
+    visionProvider,
+    visionBaseUrl,
+    visionApi,
+    visionModel,
+    visionApiKey,
+    visionApiKeyConfigured,
+  ]);
+
+  const savedCustomProfileOptions = useMemo<SavedCustomProfileOption[]>(
+    () => profileEntries.map((e) => ({ id: e.id, label: e.label, unsaved: e.unsaved })),
+    [profileEntries],
+  );
 
   // "Apply" vs "Save": switching the active provider to another *already-saved* config
   // (preset / OAuth / persisted profile) is an activation, not new data → label it Apply.
@@ -1750,7 +1797,7 @@ export default function SettingsPanel() {
       <Divider style={{ margin: '4px 0 8px' }} />
 
       <ApiProfilesSection
-        profiles={apiProfiles}
+        profiles={profileEntries}
         activeProviderId={provider}
         loading={saving}
         onSelectProfile={loadApiProfileIntoForm}

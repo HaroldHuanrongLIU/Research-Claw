@@ -27,6 +27,15 @@ export interface ApiProfile {
   requiresApiKey: boolean;
 }
 
+/**
+ * An ApiProfile plus a transient `unsaved` flag for a just-created draft that is
+ * not yet written to config. Both the provider picker and the inline profile
+ * list render from the same entry list so a draft appears consistently in both.
+ */
+export interface ApiProfileEntry extends ApiProfile {
+  unsaved?: boolean;
+}
+
 const BUILTIN_PROVIDER_IDS = new Set(PROVIDER_PRESETS.map((p) => p.id));
 
 export function isApiProfileProviderKey(providerKey: string): boolean {

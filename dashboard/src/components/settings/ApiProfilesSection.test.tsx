@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import ApiProfilesSection from './ApiProfilesSection';
-import type { ApiProfile } from '../../utils/api-profiles';
+import type { ApiProfile, ApiProfileEntry } from '../../utils/api-profiles';
 
 // Mock antd App.useApp (modal.confirm)
 vi.mock('antd', async () => {
@@ -42,12 +42,12 @@ function makeProfile(overrides: Partial<ApiProfile> = {}): ApiProfile {
   };
 }
 
-function renderSection(profiles: ApiProfile[]) {
+function renderSection(profiles: ApiProfileEntry[], onSelectProfile = vi.fn()) {
   return render(
     <ApiProfilesSection
       profiles={profiles}
       activeProviderId=""
-      onSelectProfile={vi.fn()}
+      onSelectProfile={onSelectProfile}
       onActivateProfile={vi.fn().mockResolvedValue(undefined)}
       onAddProfile={vi.fn()}
       onDeleteProfile={vi.fn().mockResolvedValue(undefined)}
@@ -87,5 +87,22 @@ describe('ApiProfilesSection', () => {
   it('shows the missing-key status for a non-OAuth profile without a key', () => {
     renderSection([makeProfile({ apiKeyConfigured: false })]);
     expect(screen.getByText(/settings\.apiKeyMissing/)).toBeTruthy();
+  });
+
+  it('renders an unsaved draft entry with the draft marker and no activation, and does not re-select on click', () => {
+    const onSelect = vi.fn();
+    const draft: ApiProfileEntry = {
+      ...makeProfile({ id: 'custom-2', label: 'Draft X', apiKeyConfigured: false }),
+      unsaved: true,
+    };
+    renderSection([draft], onSelect);
+
+    // Shared draft marker is shown; no "Use" activation button for an unsaved draft.
+    expect(screen.getByText('providerPicker.unsavedDraft')).toBeTruthy();
+    expect(screen.queryByText(/settings\.apiProfilesUse/)).toBeNull();
+
+    // Clicking the row must not re-select (would re-hydrate config and wipe edits).
+    fireEvent.click(screen.getByText('Draft X'));
+    expect(onSelect).not.toHaveBeenCalled();
   });
 });

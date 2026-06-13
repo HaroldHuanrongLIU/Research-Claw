@@ -2,12 +2,13 @@ import React from 'react';
 import { App, Button, List, Space, Tag, Typography } from 'antd';
 import { CheckOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import type { ApiProfile } from '../../utils/api-profiles';
+import type { ApiProfile, ApiProfileEntry } from '../../utils/api-profiles';
+import { UNSAVED_PROFILE_BORDER, UNSAVED_PROFILE_BG, UNSAVED_PROFILE_TAG_KEY } from './api-profile-card-style';
 
 const { Text } = Typography;
 
 export interface ApiProfilesSectionProps {
-  profiles: ApiProfile[];
+  profiles: ApiProfileEntry[];
   /** Currently edited provider key in the form. */
   activeProviderId: string;
   loading?: boolean;
@@ -94,57 +95,84 @@ export default function ApiProfilesSection({
           }}
           renderItem={(profile) => {
             const selected = profile.id === activeProviderId;
+            const unsaved = profile.unsaved === true;
             return (
               <List.Item
                 style={{
                   padding: '8px 10px',
-                  cursor: 'pointer',
-                  background: selected ? 'rgba(59, 130, 246, 0.1)' : undefined,
+                  cursor: unsaved ? 'default' : 'pointer',
+                  // An unsaved draft is already loaded in the editor below, so it
+                  // gets a distinct dashed-accent treatment but no re-select click
+                  // (which would re-hydrate from config and wipe in-progress edits).
+                  border: unsaved ? UNSAVED_PROFILE_BORDER : undefined,
+                  background: unsaved
+                    ? UNSAVED_PROFILE_BG
+                    : selected
+                      ? 'rgba(59, 130, 246, 0.1)'
+                      : undefined,
                 }}
-                onClick={() => onSelectProfile(profile)}
-                actions={[
-                  profile.isActive ? (
-                    <Tag color="blue" style={{ margin: 0 }}>
-                      {t('settings.apiProfilesInUse', { defaultValue: 'In use' })}
-                    </Tag>
-                  ) : (
-                    <Button
-                      type="link"
-                      size="small"
-                      disabled={loading}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        // The handler surfaces its own success/error feedback; catch
-                        // here only to avoid an unhandled promise rejection.
-                        onActivateProfile(profile).catch(() => {});
-                      }}
-                    >
-                      {t('settings.apiProfilesUse', { defaultValue: 'Use' })}
-                    </Button>
-                  ),
-                  <Button
-                    type="text"
-                    size="small"
-                    danger
-                    icon={<DeleteOutlined />}
-                    disabled={loading}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      modal.confirm({
-                        title: t('settings.apiProfilesDeleteTitle', { defaultValue: 'Delete profile?' }),
-                        content: t('settings.apiProfilesDeleteDesc', {
-                          defaultValue: 'This removes saved credentials for "{{name}}".',
-                          name: profile.label,
-                        }),
-                        okText: t('common.delete', { defaultValue: 'Delete' }),
-                        okButtonProps: { danger: true },
-                        cancelText: t('settings.cancel'),
-                        centered: true,
-                        onOk: () => onDeleteProfile(profile),
-                      });
-                    }}
-                  />,
-                ]}
+                onClick={unsaved ? undefined : () => onSelectProfile(profile)}
+                actions={
+                  unsaved
+                    ? [
+                        <Tag
+                          key="draft"
+                          style={{
+                            margin: 0,
+                            borderStyle: 'dashed',
+                            borderColor: 'var(--accent-primary)',
+                            color: 'var(--accent-primary)',
+                            background: 'transparent',
+                          }}
+                        >
+                          {t(UNSAVED_PROFILE_TAG_KEY)}
+                        </Tag>,
+                      ]
+                    : [
+                        profile.isActive ? (
+                          <Tag color="blue" style={{ margin: 0 }}>
+                            {t('settings.apiProfilesInUse', { defaultValue: 'In use' })}
+                          </Tag>
+                        ) : (
+                          <Button
+                            type="link"
+                            size="small"
+                            disabled={loading}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // The handler surfaces its own success/error feedback; catch
+                              // here only to avoid an unhandled promise rejection.
+                              onActivateProfile(profile).catch(() => {});
+                            }}
+                          >
+                            {t('settings.apiProfilesUse', { defaultValue: 'Use' })}
+                          </Button>
+                        ),
+                        <Button
+                          key="delete"
+                          type="text"
+                          size="small"
+                          danger
+                          icon={<DeleteOutlined />}
+                          disabled={loading}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            modal.confirm({
+                              title: t('settings.apiProfilesDeleteTitle', { defaultValue: 'Delete profile?' }),
+                              content: t('settings.apiProfilesDeleteDesc', {
+                                defaultValue: 'This removes saved credentials for "{{name}}".',
+                                name: profile.label,
+                              }),
+                              okText: t('common.delete', { defaultValue: 'Delete' }),
+                              okButtonProps: { danger: true },
+                              cancelText: t('settings.cancel'),
+                              centered: true,
+                              onOk: () => onDeleteProfile(profile),
+                            });
+                          }}
+                        />,
+                      ]
+                }
               >
                 <List.Item.Meta
                   title={
