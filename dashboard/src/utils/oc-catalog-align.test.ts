@@ -277,3 +277,58 @@ describe('alignConfigModels — whole-config alignment against OC 2026.6.1', () 
     expect(alignConfigModels({ models: {} }, catalog).changes).toHaveLength(0);
   });
 });
+
+describe('alignCardWithCatalog — user-pinned (manual) windows are never re-aligned', () => {
+  it('skips a manual card even when OC has an authoritative match (would otherwise change)', () => {
+    // gpt-5.4 under openai is an exact 272K match — a normal card would be lifted
+    // from 128K to 272K. With contextWindowSource:'manual' the card is frozen.
+    const card: RcModelCard = {
+      id: 'gpt-5.4',
+      contextWindow: 128_000,
+      contextWindowSource: 'manual',
+    };
+    const r = alignCardWithCatalog('openai', card, catalog);
+    expect(r.changed).toBe(false);
+    expect(r.matched).toBe('none');
+    expect(r.card.contextWindow).toBe(128_000);
+    expect(r.card.contextWindowSource).toBe('manual');
+  });
+
+  it('still aligns an auto card (explicit contextWindowSource:auto)', () => {
+    const card: RcModelCard = {
+      id: 'gpt-5.4',
+      contextWindow: 128_000,
+      contextWindowSource: 'auto',
+    };
+    const r = alignCardWithCatalog('openai', card, catalog);
+    expect(r.changed).toBe(true);
+    expect(r.card.contextWindow).toBe(272_000);
+  });
+
+  it('alignConfigModels leaves a manual card untouched while aligning its auto neighbors', () => {
+    const cfg: Record<string, unknown> = {
+      models: {
+        providers: {
+          'custom-relay': {
+            api: 'openai-completions',
+            models: [
+              { id: 'gpt-5.4', name: 'My Relay', contextWindow: 64_000, contextWindowSource: 'manual', maxTokens: 16_384 },
+            ],
+          },
+          openai: {
+            api: 'openai-chatgpt-responses',
+            models: [
+              { id: 'gpt-5.4', name: 'gpt-5.4', contextWindow: 128_000, maxTokens: 16_384 },
+            ],
+          },
+        },
+      },
+    };
+    const { config, changes } = alignConfigModels(cfg, catalog);
+    const providers = (config.models as { providers: Record<string, { models: RcModelCard[] }> }).providers;
+    // Manual card frozen at 64K; only the auto openai card is aligned to 272K.
+    expect(providers['custom-relay'].models[0].contextWindow).toBe(64_000);
+    expect(providers.openai.models[0].contextWindow).toBe(272_000);
+    expect(changes.map((c) => c.provider)).toEqual(['openai']);
+  });
+});

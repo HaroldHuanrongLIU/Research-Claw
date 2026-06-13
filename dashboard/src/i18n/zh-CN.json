@@ -621,6 +621,29 @@
     "advancedTextEndpoint": "文本端点模型高级设置",
     "advancedVisionEndpoint": "视觉端点高级设置",
     "visionInheritsText": "视觉沿用文本端点。如需独立端点,请选择或新建一个不同的配置。",
+    "tuning": {
+      "contextWindow": "上下文窗口 (tokens)",
+      "contextWindowHint": "仅自定义/本地端点可填。留空则交由 OpenClaw 目录或预设自动确定。填错会导致压缩过早或过晚触发。",
+      "reserveTokens": "压缩保留 tokens (影响整个会话)",
+      "compactionGlobalHint": "触发压缩前为输出预留的 token 数,作用于整个会话。须小于上下文窗口。",
+      "maxHistoryShare": "历史占比上限 (影响整个会话)",
+      "maxHistoryShareHint": "保留历史可占上下文窗口的最大比例 (0.1–0.9),作用于整个会话。",
+      "autoPlaceholder": "自动",
+      "error": {
+        "contextWindow": {
+          "notInteger": "上下文窗口必须为整数",
+          "outOfRange": "上下文窗口超出允许范围 (8192–2000000)"
+        },
+        "reserveTokens": {
+          "notInteger": "压缩保留 tokens 必须为整数",
+          "negative": "压缩保留 tokens 不能为负",
+          "exceedsWindow": "压缩保留 tokens 必须小于上下文窗口"
+        },
+        "maxHistoryShare": {
+          "outOfRange": "历史占比上限须在 0.1–0.9 之间"
+        }
+      }
+    },
     "testProtocol": "测试协议",
     "protocolTesting": "测试中…",
     "protocolVerified": "已验证",

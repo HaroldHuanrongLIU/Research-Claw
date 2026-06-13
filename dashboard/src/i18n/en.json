@@ -621,6 +621,29 @@
     "advancedTextEndpoint": "Text Endpoint Model Advanced",
     "advancedVisionEndpoint": "Vision Endpoint Advanced",
     "visionInheritsText": "Vision uses the text endpoint. To use a separate endpoint, pick or create a different configuration.",
+    "tuning": {
+      "contextWindow": "Context Window (tokens)",
+      "contextWindowHint": "Custom/local endpoints only. Leave empty to let OpenClaw's catalog or the preset decide. A wrong value triggers compaction too early or too late.",
+      "reserveTokens": "Compaction Reserve (whole session)",
+      "compactionGlobalHint": "Tokens reserved for output before compaction fires; applies to the whole session. Must be smaller than the context window.",
+      "maxHistoryShare": "Max History Share (whole session)",
+      "maxHistoryShareHint": "Maximum fraction of the context window kept history may occupy (0.1–0.9); applies to the whole session.",
+      "autoPlaceholder": "Auto",
+      "error": {
+        "contextWindow": {
+          "notInteger": "Context window must be an integer",
+          "outOfRange": "Context window out of range (8192–2000000)"
+        },
+        "reserveTokens": {
+          "notInteger": "Compaction reserve tokens must be an integer",
+          "negative": "Compaction reserve tokens cannot be negative",
+          "exceedsWindow": "Compaction reserve tokens must be smaller than the context window"
+        },
+        "maxHistoryShare": {
+          "outOfRange": "Max history share must be between 0.1 and 0.9"
+        }
+      }
+    },
     "testProtocol": "Test",
     "protocolTesting": "Testing…",
     "protocolVerified": "Verified",

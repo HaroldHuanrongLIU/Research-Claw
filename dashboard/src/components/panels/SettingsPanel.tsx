@@ -6,6 +6,7 @@ import {
   Collapse,
   Divider,
   Input,
+  InputNumber,
   Radio,
   Select,
   Spin,
@@ -30,8 +31,14 @@ import {
   buildSaveConfig,
   extractConfigFields,
   extractProviderFieldsForEditor,
+  isManualModelEndpoint,
   mergeProjectConfigsPreservingProviders,
   serializeConfigForGatewayApply,
+  validateModelTuning,
+  CONTEXT_WINDOW_MIN,
+  CONTEXT_WINDOW_MAX,
+  MAX_HISTORY_SHARE_MIN,
+  MAX_HISTORY_SHARE_MAX,
 } from '../../utils/config-patch';
 import {
   allocateNextProfileProviderId,
@@ -483,6 +490,13 @@ export default function SettingsPanel() {
   // --- Heartbeat ---
   const [heartbeatEnabled, setHeartbeatEnabled] = useState(true);
   const [heartbeatInterval, setHeartbeatInterval] = useState('30m');
+
+  // Manual-endpoint tuning (custom API profiles + ollama/vllm only): a user-pinned
+  // text contextWindow + the global compaction knobs that size the whole-session
+  // preemptive-compaction trigger. null = leave to OC/preset defaults.
+  const [customContextWindow, setCustomContextWindow] = useState<number | null>(null);
+  const [compactionReserveTokens, setCompactionReserveTokens] = useState<number | null>(null);
+  const [compactionMaxHistoryShare, setCompactionMaxHistoryShare] = useState<number | null>(null);
 
   // --- Supervisor (dual-model) ---
   const supervisorStatus = useSupervisorStore((s) => s.status);
@@ -948,6 +962,8 @@ export default function SettingsPanel() {
     const hydrated = providerConfig
       ? extractProviderFieldsForEditor(providerConfig, id)
       : null;
+    // Per-text-provider manual window: prefill only when the saved card was pinned.
+    setCustomContextWindow(hydrated?.contextWindowManual ? hydrated.contextWindow ?? null : null);
     if (hydrated) {
       setBaseUrl(hydrated.baseUrl);
       setApi(hydrated.api);
@@ -1225,6 +1241,15 @@ export default function SettingsPanel() {
     setHeartbeatEnabled(fields.heartbeatEnabled);
     setHeartbeatInterval(fields.heartbeatInterval);
 
+    // Global compaction knobs.
+    setCompactionReserveTokens(fields.compactionReserveTokens ?? null);
+    setCompactionMaxHistoryShare(fields.compactionMaxHistoryShare ?? null);
+    // Per-text-provider manual window (prefill only when pinned).
+    const textProviderFields = extractProviderFieldsForEditor(configForEditor, fields.provider);
+    setCustomContextWindow(
+      textProviderFields?.contextWindowManual ? textProviderFields.contextWindow ?? null : null,
+    );
+
     const cfgForProfiles = projectConfigCacheRef.current ?? (gatewayConfig as unknown as Record<string, unknown> | null);
     for (const p of listApiProfilesFromConfig(cfgForProfiles)) {
       profileLabelRef.current[p.id] = p.label;
@@ -1352,6 +1377,20 @@ export default function SettingsPanel() {
         }
       }
 
+      // 防蠢: only manual endpoints expose these knobs; reject absurd values
+      // before they can mis-size the compaction trigger.
+      const manualEndpoint = isManualModelEndpoint(provider);
+      if (manualEndpoint) {
+        const tuningIssues = validateModelTuning({
+          contextWindow: customContextWindow ?? undefined,
+          reserveTokens: compactionReserveTokens ?? undefined,
+          maxHistoryShare: compactionMaxHistoryShare ?? undefined,
+        });
+        if (tuningIssues.length > 0) {
+          throw new Error(tuningIssues.map((i) => t(`settings.tuning.error.${i.code}`)).join('; '));
+        }
+      }
+
       const fullConfig = buildSaveConfig(
         mergedProjectConfig,
         {
@@ -1360,6 +1399,9 @@ export default function SettingsPanel() {
           api,
           apiKey: apiKeyToSend,
           textModel: textModel.trim(),
+          customContextWindow: manualEndpoint ? customContextWindow ?? undefined : undefined,
+          compactionReserveTokens: manualEndpoint ? compactionReserveTokens ?? undefined : undefined,
+          compactionMaxHistoryShare: manualEndpoint ? compactionMaxHistoryShare ?? undefined : undefined,
           visionEnabled,
           visionProvider: visionEnabled ? visionProvider : undefined,
           visionModel: visionEnabled ? (visionModel.trim() || null) : null,
@@ -1435,7 +1477,7 @@ export default function SettingsPanel() {
     } finally {
       setSaving(false);
     }
-  }, [baseUrl, api, apiKey, provider, textModel, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, heartbeatEnabled, heartbeatInterval, supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel, reviewMode, appendReviewToChannelOutput, deviationThreshold, forceRegenerate, maxRegenerateAttempts, t, refreshAuthStatuses, supportsAuthProfiles]);
+  }, [baseUrl, api, apiKey, provider, textModel, customContextWindow, compactionReserveTokens, compactionMaxHistoryShare, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, heartbeatEnabled, heartbeatInterval, supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel, reviewMode, appendReviewToChannelOutput, deviationThreshold, forceRegenerate, maxRegenerateAttempts, t, refreshAuthStatuses, supportsAuthProfiles]);
 
   const applyConfigFieldsToForm = useCallback((configForEditor: Record<string, unknown>) => {
     const fields = extractConfigFields(configForEditor);
@@ -1913,6 +1955,60 @@ export default function SettingsPanel() {
                       ) : null}
                     </div>
                   </SettingRow>
+                )}
+
+                {isManualModelEndpoint(provider) && (
+                  <>
+                    <SettingRow
+                      label={t('settings.tuning.contextWindow')}
+                      description={t('settings.tuning.contextWindowHint')}
+                    >
+                      <InputNumber
+                        value={customContextWindow}
+                        onChange={(v) => setCustomContextWindow(typeof v === 'number' ? v : null)}
+                        size="small"
+                        style={{ width: 220 }}
+                        min={CONTEXT_WINDOW_MIN}
+                        max={CONTEXT_WINDOW_MAX}
+                        step={1024}
+                        precision={0}
+                        placeholder={t('settings.tuning.autoPlaceholder')}
+                      />
+                    </SettingRow>
+
+                    <SettingRow
+                      label={t('settings.tuning.reserveTokens')}
+                      description={t('settings.tuning.compactionGlobalHint')}
+                    >
+                      <InputNumber
+                        value={compactionReserveTokens}
+                        onChange={(v) => setCompactionReserveTokens(typeof v === 'number' ? v : null)}
+                        size="small"
+                        style={{ width: 220 }}
+                        min={0}
+                        max={CONTEXT_WINDOW_MAX}
+                        step={1024}
+                        precision={0}
+                        placeholder={t('settings.tuning.autoPlaceholder')}
+                      />
+                    </SettingRow>
+
+                    <SettingRow
+                      label={t('settings.tuning.maxHistoryShare')}
+                      description={t('settings.tuning.maxHistoryShareHint')}
+                    >
+                      <InputNumber
+                        value={compactionMaxHistoryShare}
+                        onChange={(v) => setCompactionMaxHistoryShare(typeof v === 'number' ? v : null)}
+                        size="small"
+                        style={{ width: 220 }}
+                        min={MAX_HISTORY_SHARE_MIN}
+                        max={MAX_HISTORY_SHARE_MAX}
+                        step={0.05}
+                        placeholder={t('settings.tuning.autoPlaceholder')}
+                      />
+                    </SettingRow>
+                  </>
                 )}
               </>
             ),

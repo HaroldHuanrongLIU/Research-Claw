@@ -42,6 +42,14 @@ export interface RcModelCard {
   input?: string[];
   contextWindow?: number;
   maxTokens?: number;
+  /**
+   * Provenance of `contextWindow`. `'manual'` means the user pinned it in the
+   * dashboard's advanced settings (custom/local endpoints only) — the startup
+   * aligner MUST leave such cards untouched so it never clobbers a hand-set
+   * window. Absent/`'auto'` means the value is derived from the OC catalog or
+   * the static preset and is safe to re-align.
+   */
+  contextWindowSource?: 'manual' | 'auto';
   [key: string]: unknown;
 }
 
@@ -121,6 +129,19 @@ export function alignCardWithCatalog(
     input: card.input ? [...card.input] : card.input,
     reasoning: card.reasoning,
   };
+
+  // User-pinned window: never re-align. The dashboard only stamps 'manual' for
+  // custom/local endpoints where OC has no authoritative value, so honoring it
+  // keeps the user's compaction sizing intact across restarts.
+  if (card.contextWindowSource === 'manual') {
+    return {
+      card: { ...card },
+      changed: false,
+      matched: 'none',
+      before,
+      after: before,
+    };
+  }
 
   const hit = findCatalogEntry(provider, card.id, catalog);
   if (!hit) {

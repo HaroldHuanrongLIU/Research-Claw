@@ -73,6 +73,18 @@ export interface ConfigPatchInput {
   heartbeatInterval?: string;
 
   /**
+   * Manual contextWindow for the TEXT model. Honored only for manual endpoints
+   * (custom API profiles + ollama/vllm); ignored for preset/OC-known providers
+   * so the startup aligner keeps owning their window. When set, the text card is
+   * stamped contextWindowSource:'manual'.
+   */
+  customContextWindow?: number;
+  /** Global compaction reserve tokens → agents.defaults.compaction.reserveTokens. */
+  compactionReserveTokens?: number;
+  /** Global compaction history cap → agents.defaults.compaction.maxHistoryShare (0.1–0.9). */
+  compactionMaxHistoryShare?: number;
+
+  /**
    * Restore additional provider entries that might be missing from
    * `config.get` snapshots after provider switches.
    * These providers will be added only when absent in `currentConfig.models.providers`.
@@ -120,6 +132,10 @@ export interface ExtractedConfig {
   heartbeatEnabled: boolean;
   /** Current heartbeat interval (e.g. "30m", "1h") */
   heartbeatInterval: string;
+  /** Global agents.defaults.compaction.reserveTokens (undefined when unset). */
+  compactionReserveTokens?: number;
+  /** Global agents.defaults.compaction.maxHistoryShare (undefined when unset). */
+  compactionMaxHistoryShare?: number;
 }
 
 function cleanUrl(url: string): string {
@@ -162,6 +178,90 @@ export function isLocalProvider(providerKey: string): boolean {
 }
 
 /**
+ * A "manual" endpoint is one where the user supplies the model and OpenClaw has
+ * no authoritative catalog entry: local runtimes (ollama/vllm) and custom API
+ * profiles. Only these endpoints expose the editable contextWindow / compaction
+ * knobs — preset and OC-known providers stay auto so the startup aligner owns
+ * their window.
+ */
+export function isManualModelEndpoint(providerKey: string): boolean {
+  return isLocalProvider(providerKey) || isApiProfileProviderKey(providerKey);
+}
+
+/** Hard bounds for a user-pinned contextWindow (防蠢: reject absurd values). */
+export const CONTEXT_WINDOW_MIN = 8_192;
+export const CONTEXT_WINDOW_MAX = 2_000_000;
+/** OC's accepted range for compaction.maxHistoryShare. */
+export const MAX_HISTORY_SHARE_MIN = 0.1;
+export const MAX_HISTORY_SHARE_MAX = 0.9;
+
+export interface ModelTuningInput {
+  contextWindow?: number;
+  reserveTokens?: number;
+  maxHistoryShare?: number;
+}
+
+export interface ModelTuningIssue {
+  field: 'contextWindow' | 'reserveTokens' | 'maxHistoryShare';
+  /** i18n-mappable reason code. */
+  code:
+    | 'contextWindow.notInteger'
+    | 'contextWindow.outOfRange'
+    | 'reserveTokens.notInteger'
+    | 'reserveTokens.negative'
+    | 'reserveTokens.exceedsWindow'
+    | 'maxHistoryShare.outOfRange';
+}
+
+const isFiniteInt = (n: unknown): n is number =>
+  typeof n === 'number' && Number.isFinite(n) && Number.isInteger(n);
+
+/**
+ * Pure 防蠢 validation for the manual-endpoint tuning knobs. Returns an empty
+ * array when valid. The hard constraint is `reserveTokens < contextWindow` — a
+ * non-positive usable budget would make the agent compact on turn one (or never
+ * progress), reproducing the very "compaction timeout" this feature fixes.
+ */
+export function validateModelTuning(input: ModelTuningInput): ModelTuningIssue[] {
+  const issues: ModelTuningIssue[] = [];
+  const { contextWindow, reserveTokens, maxHistoryShare } = input;
+
+  if (contextWindow !== undefined) {
+    if (!isFiniteInt(contextWindow)) {
+      issues.push({ field: 'contextWindow', code: 'contextWindow.notInteger' });
+    } else if (contextWindow < CONTEXT_WINDOW_MIN || contextWindow > CONTEXT_WINDOW_MAX) {
+      issues.push({ field: 'contextWindow', code: 'contextWindow.outOfRange' });
+    }
+  }
+
+  if (reserveTokens !== undefined) {
+    if (!isFiniteInt(reserveTokens)) {
+      issues.push({ field: 'reserveTokens', code: 'reserveTokens.notInteger' });
+    } else if (reserveTokens < 0) {
+      issues.push({ field: 'reserveTokens', code: 'reserveTokens.negative' });
+    } else if (
+      isFiniteInt(contextWindow) &&
+      contextWindow - reserveTokens <= 0
+    ) {
+      issues.push({ field: 'reserveTokens', code: 'reserveTokens.exceedsWindow' });
+    }
+  }
+
+  if (maxHistoryShare !== undefined) {
+    if (
+      typeof maxHistoryShare !== 'number' ||
+      !Number.isFinite(maxHistoryShare) ||
+      maxHistoryShare < MAX_HISTORY_SHARE_MIN ||
+      maxHistoryShare > MAX_HISTORY_SHARE_MAX
+    ) {
+      issues.push({ field: 'maxHistoryShare', code: 'maxHistoryShare.outOfRange' });
+    }
+  }
+
+  return issues;
+}
+
+/**
  * Resolve full model definition from provider presets.
  * Returns all metadata fields (input, contextWindow, maxTokens, reasoning).
  *
@@ -177,7 +277,7 @@ export function isLocalProvider(providerKey: string): boolean {
 export function resolveModelDef(
   provider: string,
   modelId: string,
-  options?: { profileLabel?: string },
+  options?: { profileLabel?: string; contextWindowOverride?: number },
 ): Record<string, unknown> {
   const preset = getPreset(provider);
   const known = preset.models.find((m) => m.id === modelId);
@@ -193,14 +293,24 @@ export function resolveModelDef(
   const oc = cache ? findCatalogEntry(provider, modelId, cache)?.entry : undefined;
   const ocCtx = oc ? (oc.contextWindow ?? oc.contextTokens) : undefined;
 
-  return {
+  // A user-pinned window (manual endpoints only) wins over OC/preset/default and
+  // is stamped 'manual' so the startup aligner skips the card.
+  const override = options?.contextWindowOverride;
+  const manualWindow =
+    typeof override === 'number' && Number.isFinite(override) && override > 0
+      ? Math.floor(override)
+      : undefined;
+
+  const card: Record<string, unknown> = {
     id: modelId,
     name: displayName,
     reasoning: oc?.reasoning ?? known?.reasoning ?? false,
     input: oc?.input ?? known?.input ?? ['text', 'image'],
-    contextWindow: ocCtx ?? known?.contextWindow ?? 32_000,
+    contextWindow: manualWindow ?? ocCtx ?? known?.contextWindow ?? 32_000,
     maxTokens: known?.maxTokens ?? 16_384,
   };
+  if (manualWindow !== undefined) card.contextWindowSource = 'manual';
+  return card;
 }
 
 /**
@@ -337,6 +447,10 @@ export function extractProviderFieldsForEditor(
   apiKey: string;
   apiKeyConfigured: boolean;
   textModel: string;
+  /** The text card's stored contextWindow (undefined when the card has none). */
+  contextWindow?: number;
+  /** True when that window was pinned by the user (contextWindowSource:'manual'). */
+  contextWindowManual: boolean;
 } | null {
   if (!config) return null;
   const providers = (config.models as Record<string, unknown> | undefined)
@@ -369,13 +483,17 @@ export function extractProviderFieldsForEditor(
   const modelDef = defaults?.model as { primary?: string } | undefined;
   const primary = modelDef?.primary ?? '';
 
+  const models = entry.models as
+    | Array<{ id: string; contextWindow?: number; contextWindowSource?: string }>
+    | undefined;
   let textModel = preset.models[0]?.id ?? '';
   if (primary.startsWith(`${providerId}/`)) {
     textModel = primary.slice(providerId.length + 1);
-  } else {
-    const models = entry.models as Array<{ id: string }> | undefined;
-    if (models?.[0]?.id) textModel = models[0].id;
+  } else if (models?.[0]?.id) {
+    textModel = models[0].id;
   }
+
+  const textCard = models?.find((m) => m.id === textModel) ?? models?.[0];
 
   return {
     baseUrl: displayBaseUrl,
@@ -383,6 +501,9 @@ export function extractProviderFieldsForEditor(
     apiKey: deRedact(apiKeyRaw),
     apiKeyConfigured: typeof apiKeyRaw === 'string' && apiKeyRaw.length > 0,
     textModel,
+    contextWindow:
+      typeof textCard?.contextWindow === 'number' ? textCard.contextWindow : undefined,
+    contextWindowManual: textCard?.contextWindowSource === 'manual',
   };
 }
 
@@ -754,6 +875,11 @@ export function buildSaveConfig(
   const textModels = [
     resolveModelDef(providerKey, input.textModel, {
       profileLabel: input.profileLabel,
+      // Honor a user-pinned window only for manual endpoints; preset/OC-known
+      // providers stay auto so the startup aligner keeps owning their window.
+      contextWindowOverride: isManualModelEndpoint(providerKey)
+        ? input.customContextWindow
+        : undefined,
     }),
   ];
 
@@ -931,6 +1057,26 @@ export function buildSaveConfig(
     model: { primary: `${providerKey}/${input.textModel}` },
     imageModel: { primary: visionRef },
   };
+
+  // --- Compaction (global; sizes the whole-session preemptive-compaction trigger) ---
+  // Only the two user-facing knobs are merged; existing fields (notably the RC
+  // default mode:'safeguard') are preserved.
+  if (
+    input.compactionReserveTokens !== undefined ||
+    input.compactionMaxHistoryShare !== undefined
+  ) {
+    const existingCompaction =
+      (existingDefaults?.compaction as Record<string, unknown> | undefined) ?? {};
+    const compaction: Record<string, unknown> = { ...existingCompaction };
+    if (input.compactionReserveTokens !== undefined) {
+      compaction.reserveTokens = input.compactionReserveTokens;
+    }
+    if (input.compactionMaxHistoryShare !== undefined) {
+      compaction.maxHistoryShare = input.compactionMaxHistoryShare;
+    }
+    if (compaction.mode === undefined) compaction.mode = 'safeguard';
+    defaults.compaction = compaction;
+  }
 
   // --- Heartbeat ---
   if (input.heartbeatEnabled !== undefined) {
@@ -1171,6 +1317,17 @@ export function extractConfigFields(
   const heartbeatEnabled = heartbeatEvery !== '0m';
   const heartbeatInterval = heartbeatEnabled ? heartbeatEvery : '30m';
 
+  // --- Compaction (global) ---
+  const compactionDef = defaults?.compaction as Record<string, unknown> | undefined;
+  const compactionReserveTokens =
+    typeof compactionDef?.reserveTokens === 'number'
+      ? (compactionDef.reserveTokens as number)
+      : undefined;
+  const compactionMaxHistoryShare =
+    typeof compactionDef?.maxHistoryShare === 'number'
+      ? (compactionDef.maxHistoryShare as number)
+      : undefined;
+
   return {
     provider: textProviderKey,
     baseUrl: displayBaseUrl,
@@ -1196,6 +1353,8 @@ export function extractConfigFields(
     webSearchApiKeyConfigured: typeof webSearchApiKeyRaw === 'string' && webSearchApiKeyRaw.length > 0,
     heartbeatEnabled,
     heartbeatInterval,
+    compactionReserveTokens,
+    compactionMaxHistoryShare,
   };
 }
 
