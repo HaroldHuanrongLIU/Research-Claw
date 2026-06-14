@@ -25,6 +25,9 @@ echo $$ > "$PIDFILE"
 cleanup_pid() { rm -f "$PIDFILE"; }
 trap cleanup_pid EXIT
 
+# Run start time — consumed by the exit farewell screen (this-run usage + duration).
+export RC_RUN_START_EPOCH=$(date +%s)
+
 # --- Banner ---
 if [ -t 1 ]; then
   R='\033[38;2;239;68;68m' B='\033[1m' D='\033[2m' N='\033[0m'
@@ -242,7 +245,7 @@ while true; do
   kill "$PROXY_PID" >/dev/null 2>&1 || true
 
   if $STOP; then
-    echo "[run] Stopped."
+    RC_NODE="$GW_NODE" bash "$(dirname "$0")/farewell.sh" || true
     exit 0
   fi
 
