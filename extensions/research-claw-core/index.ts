@@ -949,42 +949,29 @@ const plugin: PluginDefinition = {
     const wsConfig = _wsConfig!;
 
     // ── 3. Register database lifecycle service ───────────────────────
+    // stop() MUST NOT close the SQLite connection or null module singletons.
+    // OpenClaw calls service stop() on every plugin-runtime teardown — which
+    // includes `plugins.*` HOT reloads that rebuild the agent runtime WITHOUT
+    // restarting the process. _dbManager and the service instances are
+    // process-shared singletons (jiti keeps module scope across register()
+    // calls and across the gateway/agent runtimes), so closing or nulling them
+    // here would invalidate the gateway control-plane's already-registered RPC
+    // closures and permanently break every db-backed RPC with
+    // "The database connection is not open" until a full restart.
+    // The connection is process-owned and closed exactly once, in the 'exit'
+    // handler registered above.
     api.registerService({
       id: 'research-claw-db',
       start() {
-        if (dbManager?.isOpen()) {
-          const result = dbManager.db.pragma('integrity_check') as Array<{ integrity_check: string }>;
+        if (_dbManager?.isOpen()) {
+          const result = _dbManager.db.pragma('integrity_check') as Array<{ integrity_check: string }>;
           if (result[0]?.integrity_check !== 'ok') {
             api.logger.warn('Database integrity check returned warnings');
           }
         }
       },
       stop() {
-        wsService.destroy();
-        if (_dbManager?.isOpen()) {
-          // Checkpoint WAL before closing to ensure all data is flushed to the main DB file
-          _dbManager.db.pragma('wal_checkpoint(TRUNCATE)');
-          _dbManager.close();
-          api.logger.info('Research-Claw database closed');
-        }
-        // Reset module-level state so a fresh gateway restart re-initializes
-        _dbManager = null;
-        _litService = null;
-        _taskService = null;
-        _heartbeatService = null;
-        _monitorService = null;
-        _wsService = null;
-        _pptService = null;
-        _memoryService = null;
-        _sessionService = null;
-        _claudeMemSyncService = null;
-        _wsConfig = null;
-        _wsInitPromise = null;
-        _toolCallProbeCache = new Map();
-        _lastProbeResult = null;
-        _toolErrorLog.length = 0;
-        _initialized = false;
-        _registrationDone = false;
+        // No-op: process-scoped singletons survive runtime teardown (see note above).
       },
     });
 
