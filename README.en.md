@@ -12,7 +12,7 @@ You define the question. Research-Claw runs the lab. 24/7 on your machine. Every
 [![License](https://img.shields.io/badge/license-BSL_1.1-3B82F6?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/Node.js-%3E%3D22-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/platform-macOS_%7C_Windows-lightgrey?style=flat-square)](#)
-[![Skills](https://img.shields.io/badge/skills-438-EF4444?style=flat-square)](https://www.npmjs.com/package/@wentorai/research-plugins)
+[![Skills](https://img.shields.io/badge/skills-433-EF4444?style=flat-square)](https://www.npmjs.com/package/@wentorai/research-plugins)
 
 [🌐 wentor.ai](https://wentor.ai) · [🇨🇳 中文](README.md) · [📖 Docs](docs/00-reference-map.md) · [🪲 Issues](https://github.com/wentorai/Research-Claw/issues)
 
@@ -165,32 +165,38 @@ We built a purpose-designed Dashboard for academic workflows — the most comple
 
 | Panel | Features |
 |:--|:--|
-| **Chat** | Conversation interface with 21 structured card types — no more walls of text |
-| **Library** | Full-text search · Tags · Annotations · Citation graph · Reading stats |
-| **Tasks** | Agent / Human task layers · 4-level priority · 48h deadline alerts |
+| **Chat** | Conversation interface · 6 structured card types (paper / task / progress / approval / file / monitor digest) · drag-drop file & folder references · auto-titled sessions · LaTeX rendering |
+| **Literature** | Full-text search · Tags · Annotations · Citation graph · Reading stats |
 | **Workspace** | File ops with version history, every change Git-tracked |
-| **Monitor** | Keyword / author / journal tracking · Automation tasks · IM push |
-| **Settings** | Setup Wizard · All config in the browser, no file editing needed |
+| **Review** *(new)* | Structured paper critique with reviewer-verdict cards |
+| **Tasks** | Agent / Human task layers · 4-level priority · 48h deadline alerts |
+| **Monitors** | Keyword / author / journal tracking · Automation tasks · IM push |
+| **Quality Control** *(new)* | An independent reviewer model gates every answer (see below) |
+| **Extensions** *(new)* | IM channels / skills / MCP management · WeChat QR login |
+| **Settings** | Setup Wizard · one-click API protocol probe · per-endpoint context-window tuning · all config in the browser |
 
-Tech: React 18 + Vite 6 + Ant Design 5 + Zustand 5 · Bilingual EN/ZH-CN (469 i18n keys) · 1084 unit tests · TypeScript zero errors · Responsive desktop / tablet / overlay layout.
+Tech: React 18 + Vite 6 + Ant Design 5 + Zustand 5 · Bilingual EN/ZH-CN (1024 i18n keys) · 1557 unit tests · TypeScript zero errors · Responsive desktop / tablet / overlay layout.
+
+### Quality Control: A Reviewer for Your AI
+
+The biggest risk in research is confident nonsense. **Quality Control** puts an independent reviewer model behind every answer the primary model produces — when it spots fabricated citations, logic gaps, or off-target responses, it requests a rewrite before the answer reaches you. Three modes — **auto / manual / off** — with the reviewer model configurable on its own endpoint and protocol, fully decoupled from the primary.
 
 ---
 
 ## Skills & Integrations
 
-Research-Claw comes with **438 academic skills** built-in (auto-configured during install — no manual setup needed), covering the full research workflow:
+Research-Claw comes with **433 academic skills** built-in (auto-configured during install — no manual setup needed), covering the full research workflow:
 
 | Category | Count | Capabilities |
 |:--|:--|:--|
-| Literature | 87 | Multi-database search · Full-text retrieval · Tracking |
-| Methodology | 79 | DID · RDD · IV · Meta-analysis · Systematic review |
-| Data Analysis | 68 | Python · R · STATA · Visualization · Panel data |
-| Writing | 74 | Paper sections · LaTeX · Rebuttal generation |
-| Domains | 93 | 16 disciplines: CS to Law to Biology |
-| Tools | 51 | Terminal · Jupyter · Document processing |
-| Integrations | 35 | Zotero · GitHub · Slack · arXiv |
+| Domains | 147 | 16+ disciplines: CS to Law to Biology |
+| Literature | 80 | Multi-database search · Full-text retrieval · Tracking |
+| Writing | 62 | Paper sections · LaTeX · Rebuttal generation |
+| Methodology | 52 | DID · RDD · IV · Meta-analysis · Systematic review |
+| Tools | 48 | Terminal · Jupyter · Document processing (Office → Markdown) |
+| Data Analysis | 44 | Python · R · STATA · Visualization · Panel data |
 
-**34 Agent tools** connecting directly to academic databases: arXiv · OpenAlex · CrossRef · PubMed · Unpaywall · Europe PMC · DBLP · DOAJ and more
+**34 Agent tools** (across 18 API modules) connecting directly to academic databases: arXiv · OpenAlex · CrossRef · PubMed · Unpaywall · Europe PMC · DBLP · DOAJ and more
 
 **150 MCP configurations** plug-and-play:
 - **Reference managers**: Zotero · EndNote · Mendeley
@@ -209,15 +215,15 @@ Research-Claw comes with **438 academic skills** built-in (auto-configured durin
 │   L0  workspace/                  L2  dashboard/                    │
 │       ├─ SOUL.md                      React 18 + Vite 6             │
 │       ├─ AGENTS.md                    Ant Design 5 + Zustand 5      │
-│       ├─ TOOLS.md                     21 card types · 6 panels      │
+│       ├─ TOOLS.md                     6 card types · 8 panels       │
 │       ├─ HEARTBEAT.md                 WebSocket RPC v3 client       │
-│       └─ (8 bootstrap files)          469 i18n keys (EN + ZH-CN)    │
+│       └─ (8 bootstrap files)          1024 i18n keys (EN + ZH-CN)   │
 │                                             │                       │
 │   L1  extensions/                           │ ws://127.0.0.1:28789  │
 │       └─ research-claw-core                 │                       │
-│          ├─ 38 tools                        │                       │
-│          ├─ 79 WS RPC interfaces            │                       │
-│          └─ 16 SQLite tables + FTS5         ▼                       │
+│          ├─ 46 tools                        │                       │
+│          ├─ 123 WS RPC interfaces           │                       │
+│          └─ 23 SQLite tables + FTS5         ▼                       │
 │       ╔═══════════════════════════════════════════════════╗         │
 │       ║           OpenClaw  (npm dependency)              ║         │
 │       ║         Gateway · WS RPC v3 · Port 28789          ║         │
@@ -225,7 +231,7 @@ Research-Claw comes with **438 academic skills** built-in (auto-configured durin
 │                              │                                      │
 │   L3  patches/               ▼                                      │
 │       ~20 lines · 7 files    @wentorai/research-plugins             │
-│                              438 skills · 34 tools        │
+│                              433 skills · 34 tools                  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -236,7 +242,7 @@ Research-Claw comes with **438 academic skills** built-in (auto-configured durin
 | **Satellite, not fork** | OpenClaw as bundled npm dependency (no separate install needed) — upstream upgrades are absorbed cleanly; coupling surface is ~20 lines of pnpm patch |
 | **4-tier coupling** | L0 filesystem → L1 plugin SDK → L2 WS RPC → L3 patch; each tier is independently replaceable |
 | **Local-first** | SQLite + WAL mode, no database server; all data stays local, only external dependency is the LLM API |
-| **Skills over raw prompts** | 438 SKILL.md files encode domain knowledge structurally; installable/removable per research field |
+| **Skills over raw prompts** | 433 SKILL.md files encode domain knowledge structurally; installable/removable per research field |
 | **Port offset from upstream** | 28789 (Research-Claw) vs 18789 (OpenClaw default) — both can run simultaneously |
 | **Browser-configured** | No config file editing; all settings via Setup Wizard at first launch |
 
@@ -410,7 +416,7 @@ All your memory, conversation history, paper library, tasks, and workspace files
 
 | Data | Path | Description |
 |:--|:--|:--|
-| **Paper library / Tasks / Monitors** | `~/research-claw/.research-claw/library.db` | SQLite database (core data: 17 tables + FTS5 full-text index) |
+| **Paper library / Tasks / Monitors** | `~/research-claw/.research-claw/library.db` | SQLite database (core data: 23 tables + FTS5 full-text index) |
 | **Conversation history** | `~/.openclaw/agents/main/sessions/` | All chat transcripts (.jsonl files) |
 | **Agent memory** | `~/.openclaw/memory/main.sqlite` | Long-term memory FTS database |
 | **Workspace files** | `~/research-claw/workspace/` | MEMORY.md, .ResearchClaw/, uploaded files, Git history |
@@ -590,10 +596,10 @@ research-claw/
 │       ├── components/   # TopBar, LeftNav, ChatView, panels, cards
 │       ├── gateway/      # WS RPC v3 client + hooks
 │       ├── i18n/         # en.json + zh-CN.json
-│       ├── stores/       # Zustand stores × 7
-│       └── types/        # 21 Card type definitions
+│       ├── stores/       # Zustand stores × 18
+│       └── types/        # 6 Card type definitions
 ├── extensions/
-│   └── research-claw-core/   # 28 tools · 52 RPC · 13 tables
+│   └── research-claw-core/   # 46 tools · 123 RPC · 23 tables
 ├── patches/          # pnpm patch (~20 lines, 7 files)
 ├── scripts/          # install / health / backup / sync
 ├── skills/           # Custom SKILL.md files

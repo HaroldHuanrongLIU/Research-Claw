@@ -12,7 +12,7 @@
 [![License](https://img.shields.io/badge/license-BSL_1.1-3B82F6?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/Node.js-%3E%3D22-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/platform-macOS_%7C_Windows-lightgrey?style=flat-square)](#)
-[![Skills](https://img.shields.io/badge/skills-438-EF4444?style=flat-square)](https://www.npmjs.com/package/@wentorai/research-plugins)
+[![Skills](https://img.shields.io/badge/skills-433-EF4444?style=flat-square)](https://www.npmjs.com/package/@wentorai/research-plugins)
 
 [🌐 wentor.ai](https://wentor.ai) · [🇬🇧 English](README.en.md) · [📖 文档](docs/00-reference-map.md) · [🪲 问题反馈](https://github.com/wentorai/Research-Claw/issues)
 
@@ -167,32 +167,38 @@ curl -fsSL https://wentor.ai/install.sh | bash
 
 | 面板 | 功能 |
 |:--|:--|
-| **Chat** | 对话主界面，21 种结构化输出卡片，告别纯文本墙 |
+| **Chat 对话** | 对话主界面 · 6 种结构化卡片（论文 / 任务 / 进度 / 审批 / 文件 / 监控摘要）· 文件与文件夹拖拽引用 · 首轮自动命名 · LaTeX 公式渲染 |
 | **文献库** | 全文检索 · 标签 · 批注 · 引用图谱 · 阅读统计 |
-| **任务** | Agent / Human 任务分层 · 四级优先级 · 48h 截止日期预警 |
 | **工作区** | 文件操作与版本历史，Git 追踪每一次变更 |
+| **论文评审** *(新)* | 结构化拆解论文优缺点，生成评审结论卡片 |
+| **任务** | Agent / Human 任务分层 · 四级优先级 · 48h 截止日期预警 |
 | **监控** | 追踪关键词 / 学者 / 期刊 · 自动化任务配置 · IM 推送 |
-| **设置** | Setup Wizard · 所有配置在浏览器完成，无需编辑文件 |
+| **质量管控** *(新)* | 独立审稿模型为每条回答做质量门控（详见下文） |
+| **扩展** *(新)* | IM 通道 / 技能 / MCP 管理 · 微信扫码登录 |
+| **设置** | Setup Wizard · API 协议探针一键识别端点 · 端点级上下文窗口调参 · 全程浏览器配置 |
 
-技术规格：React 18 + Vite 6 + Ant Design 5 + Zustand 5，中英双语（469 i18n keys），1084 单元测试，TypeScript 零报错，响应式支持桌面 / 平板 / 浮窗三种模式。
+技术规格：React 18 + Vite 6 + Ant Design 5 + Zustand 5，中英双语（1024 i18n keys），1557 单元测试，TypeScript 零报错，响应式支持桌面 / 平板 / 浮窗三种模式。
+
+### 质量管控：给你的 AI 配一个审稿人
+
+科研最怕「一本正经地胡说」。**质量管控**让一个独立的审稿模型在主模型给出回答后做二次把关——发现编造引用、逻辑漏洞或答非所问时，要求重写后再呈现给你。支持 **auto / manual / off** 三档，审稿模型可独立配置端点与协议，与主模型完全解耦。
 
 ---
 
 ## 技能与集成
 
-科研龙虾内置 **438 个学术技能**（安装时自动配置，无需手动操作），覆盖科研全流程：
+科研龙虾内置 **433 个学术技能**（安装时自动配置，无需手动操作），覆盖科研全流程：
 
 | 类别 | 技能数 | 典型能力 |
 |:--|:--|:--|
-| 文献检索 | 87 | 多库联搜 · 全文获取 · 文献追踪 |
-| 研究方法 | 79 | DID · RDD · IV · 元分析 · 系统综述 |
-| 数据分析 | 68 | Python · R · STATA · 可视化 · 面板数据 |
-| 学术写作 | 74 | 论文各章节 · LaTeX · 审稿意见回复 |
-| 学科领域 | 93 | 16 个学科，从 CS 到法学到生物 |
-| 效率工具 | 51 | Terminal · Jupyter · 文档处理 |
-| 外部集成 | 35 | Zotero · GitHub · Slack · arXiv |
+| 学科领域 | 147 | 16+ 个学科，从 CS 到法学到生物 |
+| 文献检索 | 80 | 多库联搜 · 全文获取 · 文献追踪 |
+| 学术写作 | 62 | 论文各章节 · LaTeX · 审稿意见回复 |
+| 研究方法 | 52 | DID · RDD · IV · 元分析 · 系统综述 |
+| 效率工具 | 48 | Terminal · Jupyter · 文档处理（Office → Markdown）|
+| 数据分析 | 44 | Python · R · STATA · 可视化 · 面板数据 |
 
-**34 个 Agent 工具**直连学术数据库：arXiv · OpenAlex · CrossRef · PubMed · Unpaywall · Europe PMC · DBLP · DOAJ 等
+**34 个 Agent 工具**（分布在 18 个 API 模块）直连学术数据库：arXiv · OpenAlex · CrossRef · PubMed · Unpaywall · Europe PMC · DBLP · DOAJ 等
 
 **150 个 MCP 配置**即插即用：
 - **文献管理**：Zotero · EndNote · Mendeley
@@ -211,15 +217,15 @@ curl -fsSL https://wentor.ai/install.sh | bash
 │   L0  workspace/                  L2  dashboard/                    │
 │       ├─ SOUL.md                      React 18 + Vite 6             │
 │       ├─ AGENTS.md                    Ant Design 5 + Zustand 5      │
-│       ├─ TOOLS.md                     21 卡片类型 · 6 面板            │
+│       ├─ TOOLS.md                     6 卡片类型 · 8 面板             │
 │       ├─ HEARTBEAT.md                 WebSocket RPC v3 客户端        │
-│       └─ (8 bootstrap files)          469 i18n keys (EN + ZH-CN)    │
+│       └─ (8 bootstrap files)          1024 i18n keys (EN + ZH-CN)   │
 │                                             │                       │
 │   L1  extensions/                           │ ws://127.0.0.1:28789  │
 │       └─ research-claw-core                 │                       │
-│          ├─ 38 tools                        │                       │
-│          ├─ 79 WS RPC interfaces            │                       │
-│          └─ 16 SQLite tables + FTS5         ▼                       │
+│          ├─ 46 tools                        │                       │
+│          ├─ 123 WS RPC interfaces           │                       │
+│          └─ 23 SQLite tables + FTS5         ▼                       │
 │       ╔═══════════════════════════════════════════════════╗         │
 │       ║           OpenClaw  (npm dependency)              ║         │
 │       ║         Gateway · WS RPC v3 · Port 28789          ║         │
@@ -227,7 +233,7 @@ curl -fsSL https://wentor.ai/install.sh | bash
 │                              │                                      │
 │   L3  patches/               ▼                                      │
 │       ~20 lines · 7 files    @wentorai/research-plugins             │
-│                              438 skills · 34 tools                  │
+│                              433 skills · 34 tools                  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -238,7 +244,7 @@ curl -fsSL https://wentor.ai/install.sh | bash
 | **Satellite 而非 Fork** | OpenClaw 作为内置 npm 依赖引入（无需单独安装），上游可随时升级，耦合面控制在 ~20 行 pnpm patch |
 | **4 层耦合，从外到内** | L0 文件系统 → L1 插件 SDK → L2 WS RPC → L3 patch，每层独立，可单独替换 |
 | **本地优先** | SQLite + WAL 模式，无需数据库服务；数据全在本地，唯一外部依赖是 LLM API |
-| **技能 > 裸提示词** | 438 个 SKILL.md 结构化封装学术场景，可按研究方向安装/卸载 |
+| **技能 > 裸提示词** | 433 个 SKILL.md 结构化封装学术场景，可按研究方向安装/卸载 |
 | **端口与上游错开** | 28789（科研龙虾）vs 18789（OpenClaw 默认），两者可并存 |
 | **浏览器配置一切** | 无需编辑配置文件，所有设置通过 Setup Wizard 在浏览器完成 |
 
@@ -412,7 +418,7 @@ curl -fsSL https://wentor.ai/install.sh | bash
 
 | 数据 | 路径 | 说明 |
 |:--|:--|:--|
-| **文献库 / 任务 / 监控** | `~/research-claw/.research-claw/library.db` | SQLite 数据库（核心数据，17 张表 + FTS5 全文索引） |
+| **文献库 / 任务 / 监控** | `~/research-claw/.research-claw/library.db` | SQLite 数据库（核心数据，23 张表 + FTS5 全文索引） |
 | **会话历史** | `~/.openclaw/agents/main/sessions/` | 所有聊天记录（.jsonl 文件） |
 | **Agent 记忆** | `~/.openclaw/memory/main.sqlite` | 长期记忆 FTS 数据库 |
 | **工作区文件** | `~/research-claw/workspace/` | MEMORY.md、.ResearchClaw/、用户上传的文件、Git 历史 |
@@ -592,10 +598,10 @@ research-claw/
 │       ├── components/   # TopBar, LeftNav, ChatView, panels, cards
 │       ├── gateway/      # WS RPC v3 client + hooks
 │       ├── i18n/         # en.json + zh-CN.json
-│       ├── stores/       # Zustand stores × 7
-│       └── types/        # 21 Card type definitions
+│       ├── stores/       # Zustand stores × 18
+│       └── types/        # 6 Card type definitions
 ├── extensions/
-│   └── research-claw-core/   # 28 tools · 52 RPC · 13 tables
+│   └── research-claw-core/   # 46 tools · 123 RPC · 23 tables
 ├── patches/          # pnpm patch (~20 lines, 7 files)
 ├── scripts/          # install / health / backup / sync
 ├── skills/           # 自定义 SKILL.md 文件
