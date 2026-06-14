@@ -1298,7 +1298,10 @@ export function extractConfigFields(
   return {
     provider: textProviderKey,
     baseUrl: displayBaseUrl,
-    api: normalizeApiType(textProviderDef?.api as string),
+    // Fall back to the preset's api when the saved block omits it, identical to
+    // extractProviderFieldsForEditor — otherwise the load-time baseline and a later
+    // re-hydration of the same provider disagree and spuriously dirty the form.
+    api: normalizeApiType((textProviderDef?.api as string) ?? getPreset(textProviderKey).api),
     apiKey: deRedact(apiKeyRaw),
     apiKeyConfigured: typeof apiKeyRaw === 'string' && apiKeyRaw.length > 0,
     textModel: textModelId,

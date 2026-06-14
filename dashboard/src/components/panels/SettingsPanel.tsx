@@ -791,7 +791,10 @@ export default function SettingsPanel() {
         supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel,
         reviewMode, appendReviewToChannelOutput, deviationThreshold, forceRegenerate, maxRegenerateAttempts,
         textApiKeyDeletePending, visionApiKeyDeletePending, supervisorApiKeyDeletePending,
-        profileLabel,
+        // Only custom profiles carry an editable label; presets have none, so the
+        // label is normalized away for them — otherwise a stale label left over from
+        // a previous provider would dirty the form when switching back to a preset.
+        isApiProfileProviderKey(provider) ? profileLabel : '',
       ]),
     [
       provider, baseUrl, api, apiKey, textModel,

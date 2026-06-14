@@ -1564,6 +1564,43 @@ describe('Config picker — re-select guard, draft card, Apply/Save label', () =
     expect(getConfigActionButton().disabled).toBe(true);
   });
 
+  // Root-cause regression: A → B → A must return to a not-dirty form. Re-hydrating
+  // the original active provider must reproduce the load-time baseline exactly, so
+  // the per-provider field extraction used on switch must agree with the one used
+  // to seed the baseline (api preset fallback + provider-scoped profile label).
+  it('switching to another provider and back to the original leaves the form not dirty', () => {
+    useConfigStore.setState({
+      gatewayConfig: {
+        agents: { defaults: { model: { primary: 'minimax/MiniMax-M2.7' } } },
+        models: {
+          providers: {
+            // Active provider omits `api` (so it relies on the preset default).
+            minimax: { baseUrl: 'https://api.minimax.io/anthropic', models: [{ id: 'MiniMax-M2.7', name: 'MiniMax M2.7' }] },
+            'custom-2': { baseUrl: 'https://b.example/v1', api: 'openai-completions', models: [{ id: 'm2', name: 'm2' }] },
+          },
+        },
+      } as unknown as ReturnType<typeof makeGatewayConfig>,
+    });
+    render(<SettingsPanel />);
+
+    expect(getConfigActionButton().disabled).toBe(true);
+
+    // A → B: switching the active provider dirties the form (needs Apply/Save).
+    openProviderPicker('minimax');
+    clickPickerItem('custom-2');
+    expect(getConfigActionButton().disabled).toBe(false);
+
+    // B → A: returning to the persisted active provider, with no edits, must be clean.
+    const minimaxCard = screen
+      .getAllByText('MiniMax (International)')
+      .map((el) => el.closest('.ant-list-item'))
+      .find(Boolean) as HTMLElement;
+    act(() => {
+      fireEvent.click(minimaxCard);
+    });
+    expect(getConfigActionButton().disabled).toBe(true);
+  });
+
   // Fix #2
   it('shows an unsaved-draft card in the picker after clicking "Add custom profile"', () => {
     useConfigStore.setState({ gatewayConfig: makeProfilesConfig() });
