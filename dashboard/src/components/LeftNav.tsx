@@ -44,6 +44,9 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'workspace', icon: <FolderOutlined />, labelKey: 'nav.workspace' },
   { key: 'review', icon: <FileSearchOutlined />, labelKey: 'nav.review' },
   { key: 'tasks', icon: <CheckSquareOutlined />, labelKey: 'nav.tasks' },
+  // 'jobs' (background jobs) is intentionally not a top-level nav entry — it is
+  // surfaced natively via the StatusBar activity indicator + OS notifications.
+  // The panel is still reachable by clicking that indicator (setRightPanelTab).
   { key: 'monitor', icon: <EyeOutlined />, labelKey: 'nav.monitor' },
   { key: 'supervisor', icon: <SafetyCertificateOutlined />, labelKey: 'nav.supervisor' },
   { key: 'extensions', icon: <ApiOutlined />, labelKey: 'nav.extensions' },

@@ -55,7 +55,11 @@
       "monitor_note",
       "ppt_init",
       "ppt_export",
-      "skill_search"
+      "skill_search",
+      "job_start",
+      "job_checkpoint",
+      "job_status",
+      "job_finish"
     ]
   },
   "configSchema": {

@@ -52,6 +52,7 @@ research-claw/docs/
 | 加消息卡片类型 | [modules/cards.md](engineering/modules/cards.md) |
 | 接通记忆面板 | [modules/memory.md](engineering/modules/memory.md) + [design-backlog/memory-dashboard-ui.md](engineering/design-backlog/memory-dashboard-ui.md) |
 | 搭开发环境 / 安装调试 | [engineering/install-startup.md](engineering/install-startup.md) → 根 `docs/sop/INSTALL_SOP.md` |
+| 做后台任务 / Jobs 面板 | [engineering/changelog-jobs-panel.md](engineering/changelog-jobs-panel.md)（最近一轮加固的变更说明与文件索引） |
 | 跑功能 QA / 写测试用例 | [engineering/qa-test-spec.md](engineering/qa-test-spec.md) |
 | 了解 RC 自身是什么/能做什么 | `self/`(构建中) |
 

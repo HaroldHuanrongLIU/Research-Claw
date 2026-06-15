@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { Modal } from 'antd';
 import type { ChatMessage, ChatStreamEvent, ChatAttachment } from '../gateway/types';
 import { useGatewayStore } from './gateway';
 import { useLibraryStore } from './library';
@@ -9,9 +10,11 @@ import { useSessionsStore } from './sessions';
 import { useCronStore } from './cron';
 import { useMonitorStore } from './monitor';
 import { useUiStore } from './ui';
+import { useJobsStore } from './jobs';
 import { primaryModelSupportsVision, useConfigStore } from './config';
 import { syncSystemPromptAppendToGateway } from '../utils/sync-system-prompt-append';
 import { appendReferenceBlock, dedupePaths, isImagePath } from '../utils/file-reference';
+import { buildAutoLongTaskPrompt, detectLongTaskIntent } from '../utils/long-task';
 import i18n from '../i18n';
 import { sanitizeUserMessage, CRON_REMINDER_RE } from '../utils/sanitize-message';
 import { sanitizeAssistantMessage } from '../utils/sanitize-assistant-message';
@@ -101,6 +104,25 @@ function formatStructuredRunFailureForUser(data: AgentFailureData): string {
   if (details.length > 0) lines.push(`${i18n.t('chat.failureDetails')}${details.join(' · ')}`);
   if (data.suggestion?.trim()) lines.push(`${i18n.t('chat.failureSuggestion')}${data.suggestion.trim()}`);
   return lines.join('\n');
+}
+
+/**
+ * Ask the user whether a heuristically-detected long request should be promoted
+ * to a tracked background job (which spawns an OpenClaw subagent instead of
+ * answering inline). Resolves false on cancel/dismiss, so the default is the
+ * non-surprising "answer in this turn".
+ */
+function confirmHeuristicLongTask(title: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    Modal.confirm({
+      title: i18n.t('chat.longTask.confirmTitle'),
+      content: i18n.t('chat.longTask.confirmBody', { title }),
+      okText: i18n.t('chat.longTask.confirmOk'),
+      cancelText: i18n.t('chat.longTask.confirmCancel'),
+      onOk: () => resolve(true),
+      onCancel: () => resolve(false),
+    });
+  });
 }
 
 function detectRunEndedWithoutReply(messages: ChatMessage[]): boolean {
@@ -744,6 +766,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     }
 
     const displayText = options?.displayText?.trim() || text;
+    const refPaths = dedupePaths(options?.references ?? []);
+    const fileRefPaths = refPaths.filter((p) => !isImagePath(p));
 
     // Built-in staged writing: full-paper requests run as Dashboard-orchestrated cron steps
     // (file-based completion) instead of one long chat agent run.
@@ -834,6 +858,45 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       }
     }
 
+    let outboundText = text;
+    if (!hasAttachments) {
+      const longTask = detectLongTaskIntent(trimmed, {
+        references: fileRefPaths,
+        hasAttachments,
+      });
+      // Explicit "后台/长任务/子会话" requests are promoted silently — the user
+      // asked for it. Heuristic-only matches are the false-positive-prone case,
+      // so confirm before changing behaviour from "answer now" to "spawn a
+      // background subagent". Declining falls through to a normal inline turn.
+      const explicitBackground = longTask.reasons.includes('explicit-background');
+      const promote = longTask.shouldAutoTrack
+        && (explicitBackground || await confirmHeuristicLongTask(longTask.title));
+      if (promote) {
+        try {
+          const submitted = await client.request<{ job: { id: string; title: string } }>('rc.longTask.submit', {
+            message: trimmed,
+            display_title: longTask.title,
+            session_key: get().sessionKey,
+            references: fileRefPaths,
+            detection: {
+              score: longTask.score,
+              reasons: longTask.reasons,
+            },
+          });
+          outboundText = buildAutoLongTaskPrompt({
+            jobId: submitted.job.id,
+            title: submitted.job.title,
+            originalMessage: text,
+            references: fileRefPaths,
+          });
+          useUiStore.getState().setRightPanelTab('jobs');
+          void useJobsStore.getState().loadJobs();
+        } catch (err) {
+          console.warn('[Chat] Long task auto-submit failed; falling back to normal chat:', err);
+        }
+      }
+    }
+
     // Match OC pattern: generate runId locally and set BEFORE the RPC call.
     // OC uses the idempotencyKey as chatRunId (chat.ts:194-195) so delta events
     // can match immediately, with no timing gap between RPC send and response.
@@ -843,9 +906,6 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     // Non-image references render as chips in the user bubble (images already
     // show as thumbnails). Persisted on the optimistic message; reconstructed
     // from the injected reference block after a history reload (MessageBubble).
-    const refPaths = dedupePaths(options?.references ?? []);
-    const fileRefPaths = refPaths.filter((p) => !isImagePath(p));
-
     // Build user message — include content blocks for display when attachments present
     const userMessage: ChatMessage = {
       role: 'user',
@@ -920,7 +980,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       // in the message text, which MessageBubble can detect and render
       // after history reload.
       // -----------------------------------------------------------------
-      let finalMessage = text;
+      let finalMessage = outboundText;
       let finalAttachments = rpcAttachments;
       const visionCapable = primaryModelSupportsVision();
 

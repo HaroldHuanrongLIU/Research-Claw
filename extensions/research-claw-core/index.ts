@@ -62,6 +62,10 @@ import { PaperReviewService } from './src/paper-review/service.js';
 import { registerPaperReviewRpc } from './src/paper-review/rpc.js';
 import { resolveWorkspaceRoot } from './src/workspace/resolve-root.js';
 import { registerProviderRpc } from './src/provider/rpc.js';
+import { JobService } from './src/jobs/service.js';
+import { createJobTools } from './src/jobs/tools.js';
+import { registerJobRpc } from './src/jobs/rpc.js';
+import { syncOpenClawSubagentJobs } from './src/jobs/openclaw-sync.js';
 
 // ── Plugin config shape ────────────────────────────────────────────────
 
@@ -166,6 +170,15 @@ let _sessionService: InstanceType<typeof SessionMonitoringService> | null = null
 let _memoryService: InstanceType<typeof MemoryService> | null = null;
 let _claudeMemSyncService: ClaudeMemSyncService | null = null;
 let _reviewService: PaperReviewService | null = null;
+let _jobService: JobService | null = null;
+// Server-side jobs sync loop: keeps OpenClaw subagent jobs and stale-detection
+// fresh even when no dashboard is polling, and coalesces all sync triggers
+// (RPC + timer) behind one throttle so the synchronous transcript sweep never
+// runs more than once per window.
+let _jobSyncTimer: ReturnType<typeof setInterval> | null = null;
+let _lastJobSyncAt = 0;
+const JOB_SYNC_THROTTLE_MS = 3_000;
+const JOB_SYNC_INTERVAL_MS = 20_000;
 
 // ── Tool call probe state ─────────────────────────────────────────────
 // Caches Ollama tool-calling probe results per model string (30-min TTL).
@@ -876,6 +889,7 @@ const plugin: PluginDefinition = {
       _taskService = new TaskService(_dbManager.db);
       _heartbeatService = new HeartbeatService(_dbManager.db);
       _monitorService = new MonitorService(_dbManager.db);
+      _jobService = new JobService(_dbManager.db);
       _monitorService.seedDefaults();
 
       _wsConfig = {
@@ -943,10 +957,27 @@ const plugin: PluginDefinition = {
     const taskService = _taskService!;
     const heartbeatService = _heartbeatService!;
     const monitorService = _monitorService!;
+    const jobService = _jobService!;
     const wsService = _wsService!;
     const reviewService = _reviewService!;
     const pptService = _pptService!;
     const wsConfig = _wsConfig!;
+
+    // Single coalescing entry point for the OpenClaw subagent sync. Reads the
+    // live JobService from module state (robust across restart cycles) and skips
+    // if another trigger synced within the throttle window.
+    const throttledJobSync = (): void => {
+      const svc = _jobService;
+      if (!svc) return;
+      const now = Date.now();
+      if (now - _lastJobSyncAt < JOB_SYNC_THROTTLE_MS) return;
+      _lastJobSyncAt = now;
+      try {
+        syncOpenClawSubagentJobs(svc, { logger: api.logger });
+      } catch (err) {
+        api.logger.warn(`[Jobs] OpenClaw subagent sync failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    };
 
     // ── 3. Register database lifecycle service ───────────────────────
     // stop() MUST NOT close the SQLite connection or null module singletons.
@@ -968,6 +999,25 @@ const plugin: PluginDefinition = {
           if (result[0]?.integrity_check !== 'ok') {
             api.logger.warn('Database integrity check returned warnings');
           }
+          const stalled = jobService.markStalled(90);
+          if (stalled > 0) {
+            api.logger.warn(`[Jobs] Marked ${stalled} orphaned running job(s) as stalled`);
+          }
+          const pruned = jobService.pruneOld(30);
+          if (pruned > 0) {
+            api.logger.info(`[Jobs] Pruned ${pruned} terminal job(s) older than 30 days`);
+          }
+        }
+        // Self-driving sync: refresh OpenClaw subagent jobs + sweep stalled ones
+        // on an interval so the panel and notifications stay correct without a
+        // dashboard open. unref() so it never keeps the process alive.
+        if (!_jobSyncTimer) {
+          _jobSyncTimer = setInterval(() => {
+            if (!_jobService) return;
+            throttledJobSync();
+            _jobService.markStalled(90);
+          }, JOB_SYNC_INTERVAL_MS);
+          _jobSyncTimer.unref?.();
         }
       },
       stop() {
@@ -990,6 +1040,9 @@ const plugin: PluginDefinition = {
       api.registerTool(tool);
     }
     for (const tool of createPptTools(pptService)) {
+      api.registerTool(tool);
+    }
+    for (const tool of createJobTools(jobService)) {
       api.registerTool(tool);
     }
 
@@ -1148,6 +1201,9 @@ const plugin: PluginDefinition = {
     registerTaskRpc(registerMethod, taskService);         // 10 task + 4 cron = 14 methods
     registerWorkspaceRpc(registerMethod, wsService, wsConfig.root);  // 9 methods
     registerMonitorRpc(registerMethod, monitorService);   // 12 methods
+    registerJobRpc(registerMethod, jobService, {
+      syncOpenClawSubagents: throttledJobSync,
+    });
     registerPaperReviewRpc(registerMethod, reviewService); // 6 methods
     registerPptRpc(registerMethod, pptService);           // 3 methods
     registerSessionNamingRpc(registerMethod, new SessionNamingService()); // 1 method
@@ -1869,6 +1925,21 @@ const plugin: PluginDefinition = {
     api.on('before_tool_call', (event: unknown) => {
       const evt = event as { toolName?: string; params?: Record<string, unknown> } | undefined;
       if (!evt) return {};
+
+      // Long-running processes must outlive the chat turn. A long process.poll
+      // consumes the agent's entire 300s run budget and makes the UI look stuck
+      // even when the worker continues successfully in the background.
+      if (evt.toolName === 'process' && evt.params?.action === 'poll') {
+        const timeout = Number(evt.params.timeout ?? 0);
+        if (Number.isFinite(timeout) && timeout > 15_000) {
+          return {
+            block: true,
+            blockReason:
+              'Blocked: process.poll timeout exceeds 15 seconds. Create/update a persistent job, ' +
+              'return control to the user, and check job_status in a later turn.',
+          };
+        }
+      }
 
       // ── Duplicate tool call guard ───────────────────────────────────
       const toolSig = `${evt.toolName ?? ''}::${JSON.stringify(evt.params ?? {})}`;

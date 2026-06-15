@@ -19,6 +19,7 @@
     "workspace": "Workspace",
     "review": "Review",
     "tasks": "Tasks",
+    "jobs": "Background Jobs",
     "monitor": "Monitors",
     "supervisor": "Quality Control",
     "memory": "Memory",
@@ -26,6 +27,41 @@
     "settings": "Settings",
     "collapse": "Collapse sidebar",
     "expand": "Expand sidebar"
+  },
+  "jobs": {
+    "title": "Background Jobs",
+    "hint": "Long-running work continues here even when a chat turn ends.",
+    "empty": "No background jobs",
+    "waiting": "Waiting to start",
+    "refresh": "Refresh job",
+    "cancel": "Stop job",
+    "resume": "Continue job",
+    "retry": "Retry job",
+    "actionFailed": "Job action failed",
+    "backgroundActive": "{{count}} background job(s)",
+    "notify": {
+      "completed": "Background job completed",
+      "partial": "Background job partially completed",
+      "failed": "Background job failed"
+    },
+    "status": {
+      "queued": "Queued",
+      "running": "Running",
+      "completed": "Completed",
+      "partial": "Partial",
+      "failed": "Failed",
+      "stalled": "Stalled",
+      "cancelled": "Cancelled"
+    },
+    "steps": "Sub-steps",
+    "stepAttempt": "Attempt {{count}}",
+    "stepStatus": {
+      "pending": "Pending",
+      "running": "Running",
+      "completed": "Completed",
+      "failed": "Failed",
+      "skipped": "Skipped"
+    }
   },
   "panel": {
     "dockSide": "Dock side",
@@ -37,6 +73,12 @@
     "resizeHandle": "Resize panel"
   },
   "chat": {
+    "longTask": {
+      "confirmTitle": "Run as a background job?",
+      "confirmBody": "This looks like a long task: \"{{title}}\". Run it in the background (spawns an OpenClaw subagent)? Choose \"Answer now\" to respond in this turn instead.",
+      "confirmOk": "Run in background",
+      "confirmCancel": "Answer now"
+    },
     "placeholder": "Ask your research assistant...",
     "composerHint": "Enter send · Shift+Enter newline",
     "send": "Send",

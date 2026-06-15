@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { App } from 'antd';
+import { LoadingOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useGatewayStore } from '../stores/gateway';
 import { useConfigStore } from '../stores/config';
 import { useChatStore } from '../stores/chat';
 import { useUiStore } from '../stores/ui';
+import { useJobsStore } from '../stores/jobs';
 import { RC_VERSION } from '../version';
 import { confirmApplyAppUpdate } from '../utils/app-update-ui';
 
@@ -18,6 +20,12 @@ export default function StatusBar() {
   const tokensOut = useChatStore((s) => s.tokensOut);
   const appUpdateInfo = useUiStore((s) => s.appUpdateInfo);
   const appUpdateRunning = useUiStore((s) => s.appUpdateRunning);
+  const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
+  // Select the stable array reference; derive the filtered list in render.
+  // (Filtering inside the selector returns a new array every call and sends
+  //  zustand into an infinite re-render loop.)
+  const jobs = useJobsStore((s) => s.jobs);
+  const activeJobs = jobs.filter((j) => j.status === 'queued' || j.status === 'running' || j.status === 'stalled');
   const [heartbeatAge, setHeartbeatAge] = useState(0);
 
   // Heartbeat timer — counts seconds since last tick
@@ -131,6 +139,25 @@ export default function StatusBar() {
 
       {/* Spacer */}
       <div style={{ flex: 1 }} />
+
+      {/* Background jobs activity indicator — only when something is running.
+          Click opens the Jobs panel (it has no top-level nav entry). */}
+      {activeJobs.length > 0 && (
+        <>
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={() => setRightPanelTab('jobs')}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setRightPanelTab('jobs'); }}
+            title={activeJobs.map((j) => j.title).join('\n')}
+            style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', color: 'var(--text-secondary)' }}
+          >
+            <LoadingOutlined style={{ fontSize: 11 }} />
+            <span>{t('jobs.backgroundActive', { count: activeJobs.length })}</span>
+          </span>
+          <div style={{ width: 1, height: 12, background: 'var(--border)' }} />
+        </>
+      )}
 
       {/* Update available banner — center-right, prominent */}
       {hasUpdate && (

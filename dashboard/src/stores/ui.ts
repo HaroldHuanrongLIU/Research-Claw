@@ -16,7 +16,7 @@ import { playNotificationSound } from '../utils/notification-sound';
 
 export type { ConfigPanelPlacement };
 
-export type PanelTab = 'library' | 'workspace' | 'review' | 'tasks' | 'monitor' | 'supervisor' | 'extensions' | 'settings';
+export type PanelTab = 'library' | 'workspace' | 'review' | 'tasks' | 'jobs' | 'monitor' | 'supervisor' | 'extensions' | 'settings';
 
 export type AgentStatus = 'idle' | 'thinking' | 'compacting' | 'tool_running' | 'streaming' | 'error' | 'disconnected';
 
@@ -58,7 +58,7 @@ const NOTIFICATION_SOUND_STORAGE = 'rc-notification-sound';
 const APP_UPDATE_LAST_CHECK_STORAGE = 'rc-app-update-last-check-at';
 const APP_UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 
-const VALID_TABS = new Set<PanelTab>(['library', 'workspace', 'review', 'tasks', 'monitor', 'supervisor', 'extensions', 'settings']);
+const VALID_TABS = new Set<PanelTab>(['library', 'workspace', 'review', 'tasks', 'jobs', 'monitor', 'supervisor', 'extensions', 'settings']);
 
 function loadPanelTab(): PanelTab {
   try {

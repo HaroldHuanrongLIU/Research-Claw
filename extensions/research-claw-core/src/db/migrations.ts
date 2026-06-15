@@ -339,6 +339,31 @@ const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 15,
+    name: 'add_long_running_jobs',
+    sql: [
+      `CREATE TABLE IF NOT EXISTS rc_jobs (
+  id TEXT PRIMARY KEY, type TEXT NOT NULL, title TEXT NOT NULL, session_key TEXT,
+  status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','running','completed','partial','failed','stalled','cancelled')),
+  progress INTEGER NOT NULL DEFAULT 0 CHECK(progress BETWEEN 0 AND 100), current_step TEXT,
+  input_json TEXT NOT NULL DEFAULT '{}', result_json TEXT, checkpoint_json TEXT NOT NULL DEFAULT '{}',
+  error TEXT, heartbeat_at TEXT, started_at TEXT, completed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`,
+      `CREATE TABLE IF NOT EXISTS rc_job_steps (
+  job_id TEXT NOT NULL REFERENCES rc_jobs(id) ON DELETE CASCADE, step_key TEXT NOT NULL, label TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','running','completed','failed','skipped')),
+  attempt INTEGER NOT NULL DEFAULT 0, progress INTEGER NOT NULL DEFAULT 0 CHECK(progress BETWEEN 0 AND 100),
+  checkpoint_json TEXT NOT NULL DEFAULT '{}', error TEXT, started_at TEXT, completed_at TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (job_id, step_key)
+);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_jobs_status ON rc_jobs(status);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_jobs_session ON rc_jobs(session_key);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_jobs_updated ON rc_jobs(updated_at);`,
+      `CREATE INDEX IF NOT EXISTS idx_rc_job_steps_status ON rc_job_steps(status);`,
+    ].join('\n'),
+  },
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────

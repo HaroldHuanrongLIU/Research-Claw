@@ -15,6 +15,7 @@ const { Text } = Typography;
 const LibraryPanel = lazy(() => import('./panels/LibraryPanel'));
 const WorkspacePanel = lazy(() => import('./panels/WorkspacePanel'));
 const TaskPanel = lazy(() => import('./panels/TaskPanel'));
+const JobsPanel = lazy(() => import('./panels/JobsPanel'));
 const MonitorPanel = lazy(() => import('./panels/MonitorPanel'));
 const ExtensionsPanel = lazy(() => import('./panels/ExtensionsPanel'));
 const SettingsPanel = lazy(() => import('./panels/SettingsPanel'));
@@ -26,6 +27,7 @@ const TAB_TITLE_KEYS: Record<PanelTab, string> = {
   workspace: 'workspace.title',
   review: 'paperReview.title',
   tasks: 'tasks.title',
+  jobs: 'jobs.title',
   monitor: 'monitor.title',
   supervisor: 'supervisor.title',
   extensions: 'extensions.title',
@@ -42,6 +44,8 @@ function PanelContent({ tab }: { tab: PanelTab }) {
       return <PaperReviewPanel />;
     case 'tasks':
       return <TaskPanel />;
+    case 'jobs':
+      return <JobsPanel />;
     case 'monitor':
       return <MonitorPanel />;
     case 'supervisor':
