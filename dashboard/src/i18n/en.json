@@ -677,6 +677,9 @@
         },
         "maxHistoryShare": {
           "outOfRange": "Max history share must be between 0.1 and 0.9"
+        },
+        "compaction": {
+          "unrecoverable": "This context window / max history share combination prevents auto-compaction from recovering (pruned history still exceeds the budget, so the session re-triggers compaction forever). Raise the context window or lower the max history share."
         }
       }
     },
@@ -743,6 +746,7 @@
     "restartHint": "Saving writes the config and restarts the gateway; the dashboard reconnects automatically.",
     "saved": "Saved",
     "saveFailed": "Save failed — the gateway may have restarted. Try again",
+    "saveFailedInvalid": "Save failed — the configuration was rejected: {{reason}}",
     "copyFailed": "Copy failed — your browser may not support clipboard access",
     "validationMissing": "Please enter API URL and model name",
     "save": "Save",

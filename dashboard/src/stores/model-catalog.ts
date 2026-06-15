@@ -6,7 +6,7 @@ import {
   alignConfigModels,
   type OcModelCatalogEntry,
 } from '../utils/oc-catalog-align';
-import { serializeConfigForGatewayApply } from '../utils/config-patch';
+import { serializeConfigForGatewayApply, isManualModelEndpoint } from '../utils/config-patch';
 import { setModelCatalogCache } from '../utils/catalog-cache';
 
 /**
@@ -80,7 +80,7 @@ export const useModelCatalogStore = create<ModelCatalogState>((set, get) => ({
 
       const snap = await client.request<ConfigGetSnapshot>('config.get', {});
       const current = (snap.parsed ?? snap.config ?? {}) as Record<string, unknown>;
-      const { config, changes } = alignConfigModels(current, catalog);
+      const { config, changes } = alignConfigModels(current, catalog, isManualModelEndpoint);
 
       if (changes.length > 0) {
         await client.request('config.apply', {

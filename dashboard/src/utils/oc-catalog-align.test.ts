@@ -278,41 +278,34 @@ describe('alignConfigModels — whole-config alignment against OC 2026.6.1', () 
   });
 });
 
-describe('alignCardWithCatalog — user-pinned (manual) windows are never re-aligned', () => {
-  it('skips a manual card even when OC has an authoritative match (would otherwise change)', () => {
+describe('alignCardWithCatalog — manual-endpoint windows are never re-aligned', () => {
+  it('skips a manual-endpoint card even when OC has an authoritative match (would otherwise change)', () => {
     // gpt-5.4 under openai is an exact 272K match — a normal card would be lifted
-    // from 128K to 272K. With contextWindowSource:'manual' the card is frozen.
-    const card: RcModelCard = {
-      id: 'gpt-5.4',
-      contextWindow: 128_000,
-      contextWindowSource: 'manual',
-    };
-    const r = alignCardWithCatalog('openai', card, catalog);
+    // from 128K to 272K. The injected predicate marks the provider as a manual
+    // endpoint (user-owned window), so the card is frozen.
+    const card: RcModelCard = { id: 'gpt-5.4', contextWindow: 128_000 };
+    const r = alignCardWithCatalog('openai', card, catalog, () => true);
     expect(r.changed).toBe(false);
     expect(r.matched).toBe('none');
     expect(r.card.contextWindow).toBe(128_000);
-    expect(r.card.contextWindowSource).toBe('manual');
   });
 
-  it('still aligns an auto card (explicit contextWindowSource:auto)', () => {
-    const card: RcModelCard = {
-      id: 'gpt-5.4',
-      contextWindow: 128_000,
-      contextWindowSource: 'auto',
-    };
+  it('still aligns a card whose provider is NOT a manual endpoint', () => {
+    const card: RcModelCard = { id: 'gpt-5.4', contextWindow: 128_000 };
+    // Default predicate treats nothing as manual → normal alignment applies.
     const r = alignCardWithCatalog('openai', card, catalog);
     expect(r.changed).toBe(true);
     expect(r.card.contextWindow).toBe(272_000);
   });
 
-  it('alignConfigModels leaves a manual card untouched while aligning its auto neighbors', () => {
+  it('alignConfigModels skips manual-endpoint providers while aligning preset ones', () => {
     const cfg: Record<string, unknown> = {
       models: {
         providers: {
           'custom-relay': {
             api: 'openai-completions',
             models: [
-              { id: 'gpt-5.4', name: 'My Relay', contextWindow: 64_000, contextWindowSource: 'manual', maxTokens: 16_384 },
+              { id: 'gpt-5.4', name: 'My Relay', contextWindow: 64_000, maxTokens: 16_384 },
             ],
           },
           openai: {
@@ -324,9 +317,11 @@ describe('alignCardWithCatalog — user-pinned (manual) windows are never re-ali
         },
       },
     };
-    const { config, changes } = alignConfigModels(cfg, catalog);
+    // Provider key is the source of truth: custom-relay is a manual endpoint, openai is not.
+    const isManual = (provider: string) => provider === 'custom-relay';
+    const { config, changes } = alignConfigModels(cfg, catalog, isManual);
     const providers = (config.models as { providers: Record<string, { models: RcModelCard[] }> }).providers;
-    // Manual card frozen at 64K; only the auto openai card is aligned to 272K.
+    // Manual-endpoint card frozen at 64K; only the preset openai card is aligned to 272K.
     expect(providers['custom-relay'].models[0].contextWindow).toBe(64_000);
     expect(providers.openai.models[0].contextWindow).toBe(272_000);
     expect(changes.map((c) => c.provider)).toEqual(['openai']);

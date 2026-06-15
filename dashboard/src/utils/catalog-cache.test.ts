@@ -42,9 +42,9 @@ describe('resolveModelDef catalog priority', () => {
     expect(card.contextWindow).toBe(200_000);
   });
 
-  it('with cache, a model neither preset nor OC knows still gets the 32K fallback', () => {
+  it('with cache, a model neither preset nor OC knows still gets the OC-default fallback', () => {
     setModelCatalogCache(ocModelsListAllPayload.models);
     const card = resolveModelDef('faux-provider', 'totally-unknown-model-xyz');
-    expect(card.contextWindow).toBe(32_000);
+    expect(card.contextWindow).toBe(200_000); // OC-aligned hard fallback (DEFAULT_CONTEXT_TOKENS)
   });
 });

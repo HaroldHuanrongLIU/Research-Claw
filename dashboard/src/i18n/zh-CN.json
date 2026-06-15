@@ -677,6 +677,9 @@
         },
         "maxHistoryShare": {
           "outOfRange": "历史占比上限须在 0.1–0.9 之间"
+        },
+        "compaction": {
+          "unrecoverable": "当前“上下文窗口 / 历史占比上限”组合会导致自动压缩无法恢复(压缩后历史仍超出预算,会话将反复触发压缩)。请提高上下文窗口,或降低历史占比上限。"
         }
       }
     },
@@ -743,6 +746,7 @@
     "restartHint": "保存后将写入配置并自动重启网关，仪表盘会自动重连。",
     "saved": "已保存",
     "saveFailed": "保存失败 — 网关可能已重启，请重试",
+    "saveFailedInvalid": "保存失败 — 配置未通过校验：{{reason}}",
     "copyFailed": "复制失败 — 浏览器可能不支持剪贴板访问",
     "validationMissing": "请填写 API 地址和模型名称",
     "save": "保存",

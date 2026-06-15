@@ -73,6 +73,24 @@ const SUPERVISOR_REVIEWER_PROVIDER_IDS = [
 
 const { Text } = Typography;
 
+const CONNECTION_LOST_RE = /connection closed|not connected/i;
+
+/**
+ * Map a save error to a user-facing toast. Only genuine connection-loss errors
+ * get the "gateway may have restarted" hint; everything else (e.g. a gateway-side
+ * config validation rejection) surfaces the actual reason rather than falsely
+ * blaming a restart.
+ */
+function saveErrorToast(
+  error: unknown,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string {
+  const reason = error instanceof Error ? error.message : String(error);
+  return CONNECTION_LOST_RE.test(reason)
+    ? t('settings.saveFailed')
+    : t('settings.saveFailedInvalid', { reason });
+}
+
 // --- Setting row layout ---
 
 function SettingRow({
@@ -1712,7 +1730,7 @@ export default function SettingsPanel() {
         if (client.isConnected && !/connection closed|not connected/i.test(messageText)) {
           configStore.setPendingConfigRestart(false);
         }
-        message.error(t('settings.saveFailed'));
+        message.error(saveErrorToast(error, t));
         throw error;
       } finally {
         setSaving(false);
@@ -1735,8 +1753,8 @@ export default function SettingsPanel() {
         message.success(
           t('settings.apiProfilesDeleted', { defaultValue: 'API profile removed' }),
         );
-      } catch {
-        message.error(t('settings.saveFailed'));
+      } catch (e) {
+        message.error(saveErrorToast(e, t));
       }
     },
     [message, performDeleteApiProfiles, t],
@@ -1762,8 +1780,8 @@ export default function SettingsPanel() {
         try {
           await performSave();
           message.success(t('settings.saved'));
-        } catch {
-          message.error(t('settings.saveFailed'));
+        } catch (e) {
+          message.error(saveErrorToast(e, t));
         }
       },
     });

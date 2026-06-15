@@ -42,16 +42,17 @@ export interface RcModelCard {
   input?: string[];
   contextWindow?: number;
   maxTokens?: number;
-  /**
-   * Provenance of `contextWindow`. `'manual'` means the user pinned it in the
-   * dashboard's advanced settings (custom/local endpoints only) — the startup
-   * aligner MUST leave such cards untouched so it never clobbers a hand-set
-   * window. Absent/`'auto'` means the value is derived from the OC catalog or
-   * the static preset and is safe to re-align.
-   */
-  contextWindowSource?: 'manual' | 'auto';
   [key: string]: unknown;
 }
+
+/**
+ * Predicate: is this provider key a manual endpoint (custom API profile or local
+ * runtime) whose window the user owns? Such cards are never re-aligned. Injected
+ * (rather than imported) to keep this module dependency-free and avoid a cycle
+ * with config-patch. Defaults to "never manual" so callers that align a trusted
+ * catalog-backed config (e.g. tests) get the plain alignment behavior.
+ */
+export type IsManualEndpoint = (providerKey: string) => boolean;
 
 export type CatalogMatchKind = 'exact' | 'basename' | 'none';
 
@@ -123,6 +124,7 @@ export function alignCardWithCatalog(
   provider: string,
   card: RcModelCard,
   catalog: OcModelCatalogEntry[],
+  isManualEndpoint: IsManualEndpoint = () => false,
 ): CardAlignment {
   const before = {
     contextWindow: card.contextWindow,
@@ -130,10 +132,11 @@ export function alignCardWithCatalog(
     reasoning: card.reasoning,
   };
 
-  // User-pinned window: never re-align. The dashboard only stamps 'manual' for
-  // custom/local endpoints where OC has no authoritative value, so honoring it
-  // keeps the user's compaction sizing intact across restarts.
-  if (card.contextWindowSource === 'manual') {
+  // Manual endpoints (custom API profiles + local runtimes) own their window:
+  // OC has no authoritative catalog value for them and the user may have pinned
+  // it in advanced settings, so never re-align. The provider key is the single
+  // source of truth — the same predicate that gates the editable window knob.
+  if (isManualEndpoint(provider)) {
     return {
       card: { ...card },
       changed: false,
@@ -208,6 +211,7 @@ interface ConfigProviderShape {
 export function alignConfigModels(
   config: Record<string, unknown>,
   catalog: OcModelCatalogEntry[],
+  isManualEndpoint: IsManualEndpoint = () => false,
 ): ConfigAlignResult {
   const next = structuredClone(config);
   const changes: ConfigModelChange[] = [];
@@ -222,7 +226,7 @@ export function alignConfigModels(
     if (!Array.isArray(models)) continue;
     models.forEach((card, i) => {
       if (!card || typeof card.id !== 'string') return;
-      const r = alignCardWithCatalog(providerKey, card, catalog);
+      const r = alignCardWithCatalog(providerKey, card, catalog, isManualEndpoint);
       if (!r.changed) return;
       models[i] = r.card;
       changes.push({

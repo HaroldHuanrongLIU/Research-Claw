@@ -209,6 +209,9 @@ beforeEach(() => {
     gatewayConfig: null,
     gatewayConfigLoading: false,
     _configRetryCount: 0,
+    // A prior save test can leave this true (success path never clears it until
+    // the post-restart reconnect), which disables the Save button for the next test.
+    pendingConfigRestart: false,
   });
 
   useUiStore.setState({
@@ -368,6 +371,83 @@ describe('Issue 6: Settings save confirmation dialog', () => {
     const upsertParams = upsertCalls[0][1] as { desiredConfig: Record<string, unknown>; operationId: string };
     expect(upsertParams.desiredConfig).toBeDefined();
     expect(upsertParams.operationId).toBeTruthy();
+  });
+
+  // Regression: a gateway-side config validation rejection must surface its real
+  // reason, NOT the misleading "gateway may have restarted" hint.
+  it('shows the validation reason (not a restart hint) when upsert is rejected by config validation', async () => {
+    const mockRequest = vi.fn().mockImplementation((method: string) => {
+      if (method === 'rc.app.check_updates') return Promise.resolve(stubCheckUpdatesResponse());
+      if (method === 'rc.auth.statuses') return Promise.resolve({ custom: { configured: false } });
+      if (method === 'config.get') return Promise.resolve({ config: minimalGatewayConfig(), hash: 'abc123' });
+      if (method === 'rc.provider.validate') return Promise.resolve({ ok: true });
+      if (method === 'rc.provider.upsert') {
+        return Promise.reject(
+          new Error('Config validation failed: models.providers.custom.models.0: Unrecognized key'),
+        );
+      }
+      if (method === 'config.apply') return Promise.resolve({});
+      return defaultMockRequest(method);
+    });
+
+    useGatewayStore.setState({ client: createMockClient(mockRequest), state: 'connected', serverVersion: '0.5.8' });
+    useConfigStore.setState({ gatewayConfig: minimalGatewayConfig(), gatewayConfigLoading: false });
+
+    render(<SettingsPanel />);
+    await waitFor(() => expect(screen.getByText('settings.restartHint')).toBeInTheDocument());
+    // Let any pending hydration (supervisor/auth fetch) settle and re-baseline the
+    // form BEFORE we edit, so the dirty flag isn't cleared by a late baselineTick bump.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    fireEvent.change(screen.getByDisplayValue('test-model'), { target: { value: 'test-model-edited' } });
+    await clickConfigSaveButton();
+
+    const confirmCall = mockModalConfirm.mock.calls[0][0] as { onOk: () => Promise<void> };
+    mockMessageError.mockClear();
+    await act(async () => {
+      await confirmCall.onOk();
+    });
+
+    expect(mockMessageError).toHaveBeenCalledWith('settings.saveFailedInvalid');
+    expect(mockMessageError).not.toHaveBeenCalledWith('settings.saveFailed');
+  });
+
+  // A genuine dropped connection should still show the restart hint.
+  it('shows the restart hint when upsert fails due to a closed connection', async () => {
+    const mockRequest = vi.fn().mockImplementation((method: string) => {
+      if (method === 'rc.app.check_updates') return Promise.resolve(stubCheckUpdatesResponse());
+      if (method === 'rc.auth.statuses') return Promise.resolve({ custom: { configured: false } });
+      if (method === 'config.get') return Promise.resolve({ config: minimalGatewayConfig(), hash: 'abc123' });
+      if (method === 'rc.provider.validate') return Promise.resolve({ ok: true });
+      if (method === 'rc.provider.upsert') return Promise.reject(new Error('connection closed'));
+      if (method === 'config.apply') return Promise.resolve({});
+      return defaultMockRequest(method);
+    });
+
+    useGatewayStore.setState({ client: createMockClient(mockRequest), state: 'connected', serverVersion: '0.5.8' });
+    useConfigStore.setState({ gatewayConfig: minimalGatewayConfig(), gatewayConfigLoading: false });
+
+    render(<SettingsPanel />);
+    await waitFor(() => expect(screen.getByText('settings.restartHint')).toBeInTheDocument());
+    // Let any pending hydration settle and re-baseline the form BEFORE we edit, so
+    // the dirty flag isn't cleared by a late baselineTick bump.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    fireEvent.change(screen.getByDisplayValue('test-model'), { target: { value: 'test-model-edited' } });
+    await clickConfigSaveButton();
+
+    const confirmCall = mockModalConfirm.mock.calls[0][0] as { onOk: () => Promise<void> };
+    mockMessageError.mockClear();
+    await act(async () => {
+      await confirmCall.onOk();
+    });
+
+    expect(mockMessageError).toHaveBeenCalledWith('settings.saveFailed');
+    expect(mockMessageError).not.toHaveBeenCalledWith('settings.saveFailedInvalid');
   });
 });
 

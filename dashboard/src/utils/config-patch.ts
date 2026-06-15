@@ -75,8 +75,9 @@ export interface ConfigPatchInput {
   /**
    * Manual contextWindow for the TEXT model. Honored only for manual endpoints
    * (custom API profiles + ollama/vllm); ignored for preset/OC-known providers
-   * so the startup aligner keeps owning their window. When set, the text card is
-   * stamped contextWindowSource:'manual'.
+   * so the startup aligner keeps owning their window. The startup aligner skips
+   * manual-endpoint cards by provider key, so no per-card provenance flag is
+   * persisted (OC's model schema is strict and rejects unknown keys).
    */
   customContextWindow?: number;
   /** Global compaction history cap → agents.defaults.compaction.maxHistoryShare (0.1–0.9). */
@@ -191,6 +192,60 @@ export const CONTEXT_WINDOW_MAX = 2_000_000;
 export const MAX_HISTORY_SHARE_MIN = 0.1;
 export const MAX_HISTORY_SHARE_MAX = 0.9;
 
+/**
+ * OC's authoritative default context window for a model it cannot resolve from
+ * its catalog — mirrors `DEFAULT_CONTEXT_TOKENS` in openclaw/src/agents/defaults.ts.
+ * A custom/local card with no pinned/catalog/preset window inherits this so OC's
+ * compaction budget math (see compactionCanRecover) can always recover. Do NOT
+ * substitute a smaller "typical relay" guess: a window below the recoverable
+ * threshold makes self-compaction loop forever ("自压实未能恢复").
+ */
+export const OC_DEFAULT_CONTEXT_WINDOW = 200_000;
+
+/**
+ * OC compaction defaults, mirrored from the openclaw submodule so the dashboard
+ * can predict whether self-compaction will recover for a given window/share:
+ *   - reserve floor:     agents/agent-settings.ts (DEFAULT_AGENT_COMPACTION_RESERVE_TOKENS_FLOOR)
+ *   - min prompt budget: agents/agent-compaction-constants.ts (MIN_PROMPT_BUDGET_TOKENS / _RATIO)
+ *   - safety margin:     agents/compaction-planning.ts (SAFETY_MARGIN)
+ *   - default share:     agents/compaction-planning.ts (pruneHistoryForContextShare)
+ * Kept honest by oc-compaction-budget.parity.test.ts, which reads these from OC source.
+ */
+const OC_COMPACTION_RESERVE_TOKENS_FLOOR = 20_000;
+const OC_COMPACTION_MIN_PROMPT_BUDGET_TOKENS = 8_000;
+const OC_COMPACTION_MIN_PROMPT_BUDGET_RATIO = 0.5;
+const OC_COMPACTION_SAFETY_MARGIN = 1.2;
+const OC_DEFAULT_MAX_HISTORY_SHARE = 0.5;
+
+/**
+ * Predict whether OC's self-compaction can recover for a given context window
+ * and history share, mirroring OC's two thresholds exactly:
+ *   promptBudget  = contextWindow − min(reserveFloor, contextWindow − minPromptBudget)
+ *   historyTarget = contextWindow × maxHistoryShare × SAFETY_MARGIN
+ * When historyTarget ≥ promptBudget the pruned history alone still overflows the
+ * trigger budget, so every turn re-triggers compaction and the agent never
+ * recovers. Returns true only when historyTarget stays strictly below the budget.
+ */
+export function compactionCanRecover(contextWindow: number, maxHistoryShare?: number): boolean {
+  const cw = Math.floor(contextWindow);
+  if (!Number.isFinite(cw) || cw <= 0) return false;
+  const share =
+    typeof maxHistoryShare === 'number' && Number.isFinite(maxHistoryShare) && maxHistoryShare > 0
+      ? maxHistoryShare
+      : OC_DEFAULT_MAX_HISTORY_SHARE;
+  const minPromptBudget = Math.min(
+    OC_COMPACTION_MIN_PROMPT_BUDGET_TOKENS,
+    Math.max(1, Math.floor(cw * OC_COMPACTION_MIN_PROMPT_BUDGET_RATIO)),
+  );
+  const effectiveReserve = Math.min(
+    OC_COMPACTION_RESERVE_TOKENS_FLOOR,
+    Math.max(0, cw - minPromptBudget),
+  );
+  const promptBudget = Math.max(1, cw - effectiveReserve);
+  const historyTarget = Math.floor(cw * share * OC_COMPACTION_SAFETY_MARGIN);
+  return historyTarget < promptBudget;
+}
+
 export interface ModelTuningInput {
   contextWindow?: number;
   maxHistoryShare?: number;
@@ -202,7 +257,8 @@ export interface ModelTuningIssue {
   code:
     | 'contextWindow.notInteger'
     | 'contextWindow.outOfRange'
-    | 'maxHistoryShare.outOfRange';
+    | 'maxHistoryShare.outOfRange'
+    | 'compaction.unrecoverable';
 }
 
 const isFiniteInt = (n: unknown): n is number =>
@@ -234,6 +290,20 @@ export function validateModelTuning(input: ModelTuningInput): ModelTuningIssue[]
       maxHistoryShare > MAX_HISTORY_SHARE_MAX
     ) {
       issues.push({ field: 'maxHistoryShare', code: 'maxHistoryShare.outOfRange' });
+    }
+  }
+
+  // 防呆: even individually-valid window/share values can pair into a budget where
+  // OC's self-compaction never recovers. Predict against the window that will
+  // actually be saved (pinned value, else OC's default). Skip when a field is
+  // already flagged above to avoid contradictory errors.
+  if (issues.length === 0) {
+    const effectiveWindow = contextWindow ?? OC_DEFAULT_CONTEXT_WINDOW;
+    if (!compactionCanRecover(effectiveWindow, maxHistoryShare)) {
+      issues.push({
+        field: contextWindow !== undefined ? 'contextWindow' : 'maxHistoryShare',
+        code: 'compaction.unrecoverable',
+      });
     }
   }
 
@@ -272,8 +342,10 @@ export function resolveModelDef(
   const oc = cache ? findCatalogEntry(provider, modelId, cache)?.entry : undefined;
   const ocCtx = oc ? (oc.contextWindow ?? oc.contextTokens) : undefined;
 
-  // A user-pinned window (manual endpoints only) wins over OC/preset/default and
-  // is stamped 'manual' so the startup aligner skips the card.
+  // A user-pinned window (manual endpoints only) wins over OC/preset/default.
+  // No provenance flag is persisted: OC's model schema is strict and rejects
+  // unknown keys, so the startup aligner instead skips manual endpoints by
+  // provider key (see alignConfigModels' isManualEndpoint predicate).
   const override = options?.contextWindowOverride;
   const manualWindow =
     typeof override === 'number' && Number.isFinite(override) && override > 0
@@ -285,10 +357,9 @@ export function resolveModelDef(
     name: displayName,
     reasoning: oc?.reasoning ?? known?.reasoning ?? false,
     input: oc?.input ?? known?.input ?? ['text', 'image'],
-    contextWindow: manualWindow ?? ocCtx ?? known?.contextWindow ?? 32_000,
+    contextWindow: manualWindow ?? ocCtx ?? known?.contextWindow ?? OC_DEFAULT_CONTEXT_WINDOW,
     maxTokens: known?.maxTokens ?? 16_384,
   };
-  if (manualWindow !== undefined) card.contextWindowSource = 'manual';
   return card;
 }
 
@@ -428,7 +499,7 @@ export function extractProviderFieldsForEditor(
   textModel: string;
   /** The text card's stored contextWindow (undefined when the card has none). */
   contextWindow?: number;
-  /** True when that window was pinned by the user (contextWindowSource:'manual'). */
+  /** True for manual endpoints, whose window the user owns and the aligner never touches. */
   contextWindowManual: boolean;
 } | null {
   if (!config) return null;
@@ -463,7 +534,7 @@ export function extractProviderFieldsForEditor(
   const primary = modelDef?.primary ?? '';
 
   const models = entry.models as
-    | Array<{ id: string; contextWindow?: number; contextWindowSource?: string }>
+    | Array<{ id: string; contextWindow?: number }>
     | undefined;
   let textModel = preset.models[0]?.id ?? '';
   if (primary.startsWith(`${providerId}/`)) {
@@ -482,7 +553,9 @@ export function extractProviderFieldsForEditor(
     textModel,
     contextWindow:
       typeof textCard?.contextWindow === 'number' ? textCard.contextWindow : undefined,
-    contextWindowManual: textCard?.contextWindowSource === 'manual',
+    // Manual endpoints own their window (the aligner never overrides them), so
+    // provenance is derived from the provider key rather than a persisted flag.
+    contextWindowManual: isManualModelEndpoint(providerId),
   };
 }
 
