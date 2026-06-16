@@ -5,6 +5,7 @@ import {
   collectApiProfileRestoreEntries,
   isApiProfileProviderKey,
   listApiProfilesFromConfig,
+  mergeApiProfileAuthStatuses,
   slugifyProfileLabel,
 } from './api-profiles';
 import { REDACTED_SENTINEL } from './config-patch';
@@ -171,5 +172,24 @@ describe('api-profiles', () => {
     };
     const profiles = listApiProfilesFromConfig(config);
     expect(profiles.map((p) => p.id)).toEqual(['deepseek']);
+  });
+
+  it('merges auth profile status for providers without apiKey in config', () => {
+    const profiles = listApiProfilesFromConfig({
+      agents: { defaults: { model: { primary: 'minimax/MiniMax-M2.7' } } },
+      models: {
+        providers: {
+          minimax: {
+            baseUrl: 'https://api.minimax.io/anthropic',
+            api: 'anthropic-messages',
+            models: [{ id: 'MiniMax-M2.7' }],
+          },
+        },
+      },
+    });
+    expect(profiles[0]?.apiKeyConfigured).toBe(false);
+
+    const merged = mergeApiProfileAuthStatuses(profiles, { minimax: true });
+    expect(merged[0]?.apiKeyConfigured).toBe(true);
   });
 });

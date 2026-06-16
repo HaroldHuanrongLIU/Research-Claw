@@ -1,5 +1,5 @@
 import React from 'react';
-import { App, Button, List, Space, Tag, Typography } from 'antd';
+import { App, Button, Collapse, List, Space, Tag, Typography } from 'antd';
 import { CheckOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { ApiProfile, ApiProfileEntry } from '../../utils/api-profiles';
@@ -48,155 +48,165 @@ export default function ApiProfilesSection({
 
   return (
     <div style={{ marginBottom: 12 }}>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 8,
-        }}
-      >
-        <Text style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-          {t('settings.apiProfilesTitle', { defaultValue: 'Saved API profiles' })}
-        </Text>
-        <Button
-          type="link"
-          size="small"
-          icon={<PlusOutlined />}
-          onClick={onAddProfile}
-          style={{ padding: 0, height: 'auto' }}
-        >
-          {t('settings.apiProfilesAdd', { defaultValue: 'Add' })}
-        </Button>
-      </div>
-
-      <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 8 }}>
-        {t('settings.apiProfilesDesc', {
-          defaultValue:
-            'Save multiple custom gateways (base URL, API key, model). Switch without re-entering.',
-        })}
-      </Text>
-
-      {!hasProfiles ? (
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          {t('settings.apiProfilesEmpty', {
-            defaultValue:
-              'No saved profiles yet. Click Add or choose Custom under Provider, then fill in URL, key, and model below and Save.',
-          })}
-        </Text>
-      ) : (
-        <List
-          size="small"
-          dataSource={profiles}
-          style={{
-            background: 'var(--surface-hover)',
-            borderRadius: 8,
-            border: '1px solid var(--border)',
-          }}
-          renderItem={(profile) => {
-            const selected = profile.id === activeProviderId;
-            const unsaved = profile.unsaved === true;
-            return (
-              <List.Item
-                style={{
-                  padding: '8px 10px',
-                  cursor: unsaved ? 'default' : 'pointer',
-                  // An unsaved draft is already loaded in the editor below, so it
-                  // gets a distinct dashed-accent treatment but no re-select click
-                  // (which would re-hydrate from config and wipe in-progress edits).
-                  border: unsaved ? UNSAVED_PROFILE_BORDER : undefined,
-                  background: unsaved
-                    ? UNSAVED_PROFILE_BG
-                    : selected
-                      ? 'rgba(59, 130, 246, 0.1)'
-                      : undefined,
+      <Collapse
+        defaultActiveKey={[]}
+        size="small"
+        items={[
+          {
+            key: 'apiProfiles',
+            label: (
+              <Text style={{ fontSize: 13, color: 'var(--text-primary)' }}>
+                {t('settings.apiProfilesTitle', { defaultValue: 'Saved API profiles' })}
+              </Text>
+            ),
+            extra: (
+              <Button
+                type="link"
+                size="small"
+                icon={<PlusOutlined />}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAddProfile();
                 }}
-                onClick={unsaved ? undefined : () => onSelectProfile(profile)}
-                actions={
-                  unsaved
-                    ? [
-                        <Tag
-                          key="draft"
-                          style={{
-                            margin: 0,
-                            borderStyle: 'dashed',
-                            borderColor: 'var(--accent-primary)',
-                            color: 'var(--accent-primary)',
-                            background: 'transparent',
-                          }}
-                        >
-                          {t(UNSAVED_PROFILE_TAG_KEY)}
-                        </Tag>,
-                      ]
-                    : [
-                        profile.isActive ? (
-                          <Tag color="blue" style={{ margin: 0 }}>
-                            {t('settings.apiProfilesInUse', { defaultValue: 'In use' })}
-                          </Tag>
-                        ) : (
-                          <Button
-                            type="link"
-                            size="small"
-                            disabled={loading}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              // The handler surfaces its own success/error feedback; catch
-                              // here only to avoid an unhandled promise rejection.
-                              onActivateProfile(profile).catch(() => {});
-                            }}
-                          >
-                            {t('settings.apiProfilesUse', { defaultValue: 'Use' })}
-                          </Button>
-                        ),
-                        <Button
-                          key="delete"
-                          type="text"
-                          size="small"
-                          danger
-                          icon={<DeleteOutlined />}
-                          disabled={loading}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            modal.confirm({
-                              title: t('settings.apiProfilesDeleteTitle', { defaultValue: 'Delete profile?' }),
-                              content: t('settings.apiProfilesDeleteDesc', {
-                                defaultValue: 'This removes saved credentials for "{{name}}".',
-                                name: profile.label,
-                              }),
-                              okText: t('common.delete', { defaultValue: 'Delete' }),
-                              okButtonProps: { danger: true },
-                              cancelText: t('settings.cancel'),
-                              centered: true,
-                              onOk: () => onDeleteProfile(profile),
-                            });
-                          }}
-                        />,
-                      ]
-                }
+                style={{ padding: 0, height: 'auto' }}
               >
-                <List.Item.Meta
-                  title={
-                    <Space size={6}>
-                      {profile.isActive ? <CheckOutlined style={{ color: 'var(--accent-secondary)' }} /> : null}
-                      <span style={{ fontWeight: 500 }}>{profile.label}</span>
-                    </Space>
-                  }
-                  description={
-                    <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
-                      {summarizeUrl(profile.baseUrl)} · {profile.modelId || '—'}
-                      {!profile.requiresApiKey
-                        ? ` · ${t('settings.apiProfilesOAuth', { defaultValue: 'OAuth' })}`
-                        : profile.apiKeyConfigured
-                          ? ` · ${t('settings.providerConfigured')}`
-                          : ` · ${t('settings.apiKeyMissing')}`}
-                    </span>
-                  }
-                />
-              </List.Item>
-            );
-          }}
-        />
-      )}
+                {t('settings.apiProfilesAdd', { defaultValue: 'Add' })}
+              </Button>
+            ),
+            children: (
+              <>
+                <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 8 }}>
+                  {t('settings.apiProfilesDesc', {
+                    defaultValue:
+                      'Save multiple custom gateways (base URL, API key, model). Switch without re-entering.',
+                  })}
+                </Text>
+
+                {!hasProfiles ? (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {t('settings.apiProfilesEmpty', {
+                      defaultValue:
+                        'No saved profiles yet. Click Add or choose Custom under Provider, then fill in URL, key, and model below and Save.',
+                    })}
+                  </Text>
+                ) : (
+                  <List
+                    size="small"
+                    dataSource={profiles}
+                    style={{
+                      background: 'var(--surface-hover)',
+                      borderRadius: 8,
+                      border: '1px solid var(--border)',
+                    }}
+                    renderItem={(profile) => {
+                      const selected = profile.id === activeProviderId;
+                      const unsaved = profile.unsaved === true;
+                      return (
+                        <List.Item
+                          style={{
+                            padding: '8px 10px',
+                            cursor: unsaved ? 'default' : 'pointer',
+                            // An unsaved draft is already loaded in the editor below, so it
+                            // gets a distinct dashed-accent treatment but no re-select click
+                            // (which would re-hydrate from config and wipe in-progress edits).
+                            border: unsaved ? UNSAVED_PROFILE_BORDER : undefined,
+                            background: unsaved
+                              ? UNSAVED_PROFILE_BG
+                              : selected
+                                ? 'rgba(59, 130, 246, 0.1)'
+                                : undefined,
+                          }}
+                          onClick={unsaved ? undefined : () => onSelectProfile(profile)}
+                          actions={
+                            unsaved
+                              ? [
+                                  <Tag
+                                    key="draft"
+                                    style={{
+                                      margin: 0,
+                                      borderStyle: 'dashed',
+                                      borderColor: 'var(--accent-primary)',
+                                      color: 'var(--accent-primary)',
+                                      background: 'transparent',
+                                    }}
+                                  >
+                                    {t(UNSAVED_PROFILE_TAG_KEY)}
+                                  </Tag>,
+                                ]
+                              : [
+                                  profile.isActive ? (
+                                    <Tag color="blue" style={{ margin: 0 }}>
+                                      {t('settings.apiProfilesInUse', { defaultValue: 'In use' })}
+                                    </Tag>
+                                  ) : (
+                                    <Button
+                                      type="link"
+                                      size="small"
+                                      disabled={loading}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        // The handler surfaces its own success/error feedback; catch
+                                        // here only to avoid an unhandled promise rejection.
+                                        onActivateProfile(profile).catch(() => {});
+                                      }}
+                                    >
+                                      {t('settings.apiProfilesUse', { defaultValue: 'Use' })}
+                                    </Button>
+                                  ),
+                                  <Button
+                                    key="delete"
+                                    type="text"
+                                    size="small"
+                                    danger
+                                    icon={<DeleteOutlined />}
+                                    disabled={loading}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      modal.confirm({
+                                        title: t('settings.apiProfilesDeleteTitle', { defaultValue: 'Delete profile?' }),
+                                        content: t('settings.apiProfilesDeleteDesc', {
+                                          defaultValue: 'This removes saved credentials for "{{name}}".',
+                                          name: profile.label,
+                                        }),
+                                        okText: t('common.delete', { defaultValue: 'Delete' }),
+                                        okButtonProps: { danger: true },
+                                        cancelText: t('settings.cancel'),
+                                        centered: true,
+                                        onOk: () => onDeleteProfile(profile),
+                                      });
+                                    }}
+                                  />,
+                                ]
+                          }
+                        >
+                          <List.Item.Meta
+                            title={
+                              <Space size={6}>
+                                {profile.isActive ? <CheckOutlined style={{ color: 'var(--accent-secondary)' }} /> : null}
+                                <span style={{ fontWeight: 500 }}>{profile.label}</span>
+                              </Space>
+                            }
+                            description={
+                              <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+                                {summarizeUrl(profile.baseUrl)} · {profile.modelId || '—'}
+                                {!profile.requiresApiKey
+                                  ? ` · ${t('settings.apiProfilesOAuth', { defaultValue: 'OAuth' })}`
+                                  : profile.apiKeyConfigured
+                                    ? ` · ${t('settings.providerConfigured')}`
+                                    : ` · ${t('settings.apiKeyMissing')}`}
+                              </span>
+                            }
+                          />
+                        </List.Item>
+                      );
+                    }}
+                  />
+                )}
+              </>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

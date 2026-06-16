@@ -166,6 +166,22 @@ export function listApiProfilesFromConfig(
   return profiles;
 }
 
+/**
+ * Merge auth-profile runtime status into listed profiles.
+ * Some builtin providers store credentials in auth-profiles.json instead of
+ * models.providers.<id>.apiKey, so config-only checks can under-report.
+ */
+export function mergeApiProfileAuthStatuses(
+  profiles: ApiProfile[],
+  authConfiguredByProvider: Record<string, boolean>,
+): ApiProfile[] {
+  return profiles.map((profile) => {
+    if (!profile.requiresApiKey || profile.apiKeyConfigured) return profile;
+    if (!authConfiguredByProvider[profile.id]) return profile;
+    return { ...profile, apiKeyConfigured: true };
+  });
+}
+
 export function getActiveModelPrimary(config: Record<string, unknown> | null): string {
   const agents = config?.agents as Record<string, unknown> | undefined;
   const defaults = agents?.defaults as Record<string, unknown> | undefined;

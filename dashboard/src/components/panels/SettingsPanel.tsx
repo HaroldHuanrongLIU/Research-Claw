@@ -45,6 +45,7 @@ import {
   collectApiProfileRestoreEntries,
   isApiProfileProviderKey,
   listApiProfilesFromConfig,
+  mergeApiProfileAuthStatuses,
   profileIdToDisplayName,
   type ApiProfile,
   type ApiProfileEntry,
@@ -1069,8 +1070,11 @@ export default function SettingsPanel() {
 
   const apiProfiles = useMemo(() => {
     const cfg = projectConfigCacheRef.current ?? (gatewayConfig as unknown as Record<string, unknown> | null);
-    return listApiProfilesFromConfig(cfg);
-  }, [gatewayConfig]);
+    return mergeApiProfileAuthStatuses(
+      listApiProfilesFromConfig(cfg),
+      authConfiguredByProvider,
+    );
+  }, [gatewayConfig, authConfiguredByProvider]);
 
   const loadApiProfileIntoForm = useCallback((profile: ApiProfile) => {
     // Selecting the provider you're already on is a no-op. Re-hydrating would

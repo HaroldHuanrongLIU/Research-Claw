@@ -43,7 +43,7 @@ function makeProfile(overrides: Partial<ApiProfile> = {}): ApiProfile {
 }
 
 function renderSection(profiles: ApiProfileEntry[], onSelectProfile = vi.fn()) {
-  return render(
+  const result = render(
     <ApiProfilesSection
       profiles={profiles}
       activeProviderId=""
@@ -53,6 +53,8 @@ function renderSection(profiles: ApiProfileEntry[], onSelectProfile = vi.fn()) {
       onDeleteProfile={vi.fn().mockResolvedValue(undefined)}
     />,
   );
+  fireEvent.click(screen.getByText('settings.apiProfilesTitle'));
+  return result;
 }
 
 describe('ApiProfilesSection', () => {
