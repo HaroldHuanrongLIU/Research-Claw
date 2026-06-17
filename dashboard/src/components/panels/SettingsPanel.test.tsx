@@ -1102,6 +1102,142 @@ describe('Model tuning fields dirty gating', () => {
   });
 });
 
+describe('Delete active profile re-baselines the form', () => {
+  function getConfigSaveButton(): HTMLButtonElement {
+    const saveButtons = screen.getAllByRole('button', {
+      name: /settings\.(save|apply)|setup\.gatewayRestarting/i,
+    });
+    const btn =
+      saveButtons.find((b) => b.parentElement?.textContent?.includes('settings.restartHint')) ??
+      saveButtons[0];
+    return btn as HTMLButtonElement;
+  }
+
+  /** Two custom profiles; custom-relay-a is the active one. */
+  function makeTwoProfileConfig() {
+    return {
+      agents: {
+        defaults: {
+          model: { primary: 'custom-relay-a/m0' },
+          imageModel: { primary: 'custom-relay-a/m0' },
+        },
+      },
+      models: {
+        providers: {
+          'custom-relay-a': {
+            baseUrl: 'https://a.example/v1',
+            api: 'openai-completions',
+            apiKey: '__OPENCLAW_REDACTED__',
+            models: [{ id: 'm0', name: 'Relay A' }],
+          },
+          'custom-relay-b': {
+            baseUrl: 'https://b.example/v1',
+            api: 'openai-completions',
+            apiKey: '__OPENCLAW_REDACTED__',
+            models: [{ id: 'gpt-4o', name: 'Relay B' }],
+          },
+        },
+      },
+    };
+  }
+
+  /** Config after deleting custom-relay-a — primary falls back to relay-b. */
+  function makePostDeleteConfig() {
+    return {
+      agents: {
+        defaults: {
+          model: { primary: 'custom-relay-b/gpt-4o' },
+          imageModel: { primary: 'custom-relay-b/gpt-4o' },
+        },
+      },
+      models: {
+        providers: {
+          'custom-relay-b': {
+            baseUrl: 'https://b.example/v1',
+            api: 'openai-completions',
+            apiKey: '__OPENCLAW_REDACTED__',
+            models: [{ id: 'gpt-4o', name: 'Relay B' }],
+          },
+        },
+      },
+    };
+  }
+
+  beforeEach(() => {
+    mockModalConfirm.mockReset();
+    mockMessageSuccess.mockReset();
+    mockMessageError.mockReset();
+    useConfigStore.setState({
+      theme: 'dark',
+      locale: 'en',
+      systemPromptAppend: '',
+      bootState: 'ready',
+      pendingConfigRestart: false,
+      gatewayConfig: null,
+      gatewayConfigLoading: false,
+      _configRetryCount: 0,
+    });
+    useGatewayStore.setState({
+      client: createMockClient(),
+      state: 'connected',
+      serverVersion: '0.7.1',
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // Deleting the active profile is a one-click action that already persists +
+  // auto-switches to a remaining profile, so the footer must settle to a clean
+  // disabled "Save" — not an enabled "Apply" demanding a second confirmation.
+  it('disables the footer (Save, not Apply) after deleting the active profile', async () => {
+    const mockRequest = vi.fn().mockImplementation((method: string) => {
+      if (method === 'rc.auth.statuses') return Promise.resolve({});
+      if (method === 'config.get') {
+        return Promise.resolve({ config: makeTwoProfileConfig(), hash: 'hash-del' });
+      }
+      if (method === 'rc.provider.delete') return Promise.resolve({});
+      return Promise.resolve({});
+    });
+    // The post-delete reload swaps in a new config reference so the hydration
+    // effect fires (the fix relies on it re-baselining the form). The restart
+    // also settles, clearing pendingConfigRestart — matching what the user sees.
+    const loadGatewayConfig = vi.fn(async () => {
+      useConfigStore.setState({
+        gatewayConfig: makePostDeleteConfig(),
+        pendingConfigRestart: false,
+      });
+    });
+
+    useGatewayStore.setState({ client: createMockClient(mockRequest) });
+    useConfigStore.setState({ gatewayConfig: makeTwoProfileConfig(), loadGatewayConfig });
+
+    render(<SettingsPanel />);
+    expect(getConfigSaveButton().disabled).toBe(true);
+
+    // The active profile (relay-a) shows an "In use" tag + a delete button.
+    const inUse = screen.getByText('settings.apiProfilesInUse');
+    const activeItem = inUse.closest('.ant-list-item') as HTMLElement;
+    const deleteBtn = within(activeItem).getByRole('button');
+    await act(async () => {
+      fireEvent.click(deleteBtn);
+    });
+
+    // The delete button opens a confirm modal; invoke its onOk to confirm.
+    const confirmArgs = mockModalConfirm.mock.calls.at(-1)?.[0] as { onOk: () => Promise<void> };
+    expect(confirmArgs?.onOk).toBeTruthy();
+    await act(async () => {
+      await confirmArgs.onOk();
+    });
+
+    const footer = getConfigSaveButton();
+    expect(footer.disabled).toBe(true);
+    expect(footer.textContent).toContain('settings.save');
+    expect(footer.textContent).not.toContain('settings.apply');
+  });
+});
+
 // ============================================================
 // Task 2: independent vision endpoint + protocol auto-align
 // ============================================================

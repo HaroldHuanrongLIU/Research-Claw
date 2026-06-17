@@ -1672,6 +1672,10 @@ export default function SettingsPanel() {
         projectConfigCacheRef.current = fullConfig;
         applyConfigFieldsToForm(fullConfig);
         void refreshAuthStatuses();
+        // Delete already persisted + auto-switched the active profile, so the
+        // reload must re-baseline the form (mirrors performSave/performActivateProfile);
+        // otherwise the post-switch form stays "dirty" and the footer wrongly offers Apply.
+        syncNeeded.current = true;
         void loadGatewayConfig();
       } catch (error) {
         const messageText = error instanceof Error ? error.message : String(error);
