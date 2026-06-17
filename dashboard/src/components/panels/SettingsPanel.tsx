@@ -803,6 +803,11 @@ export default function SettingsPanel() {
     () =>
       JSON.stringify([
         provider, baseUrl, api, apiKey, textModel,
+        // Model tuning (context window / history share) only reaches the saved
+        // config for manual endpoints (see buildSaveConfig), so normalize away for
+        // presets — otherwise a stale tuning value dirties the form on preset switch.
+        isManualModelEndpoint(provider) ? customContextWindow : null,
+        isManualModelEndpoint(provider) ? compactionMaxHistoryShare : null,
         visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey,
         proxyEnabled, proxyUrl,
         webSearchEnabled, webSearchProvider, webSearchApiKey,
@@ -817,6 +822,7 @@ export default function SettingsPanel() {
       ]),
     [
       provider, baseUrl, api, apiKey, textModel,
+      customContextWindow, compactionMaxHistoryShare,
       visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey,
       proxyEnabled, proxyUrl,
       webSearchEnabled, webSearchProvider, webSearchApiKey,

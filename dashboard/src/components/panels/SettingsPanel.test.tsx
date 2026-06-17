@@ -1021,6 +1021,88 @@ describe('Save button dirty gating', () => {
 });
 
 // ============================================================
+// Model tuning fields (context window / history share) must dirty the form.
+// Regression: editing these once left the Save button stuck disabled because
+// they were absent from the dirty signature (formSignature).
+// ============================================================
+
+describe('Model tuning fields dirty gating', () => {
+  function getConfigSaveButton(): HTMLButtonElement {
+    const saveButtons = screen.getAllByRole('button', { name: /settings\.save|setup\.gatewayRestarting/i });
+    const btn = saveButtons.find((b) => b.parentElement?.textContent?.includes('settings.restartHint')) ?? saveButtons[0];
+    return btn as HTMLButtonElement;
+  }
+
+  // Manual endpoint (ollama) so the tuning inputs render; a saved maxHistoryShare
+  // gives the field a real baseline to edit away from.
+  function makeManualTuningConfig() {
+    const cfg = makeGatewayConfig('m1', 'ollama', 'http://localhost:11434/v1') as unknown as {
+      agents: { defaults: Record<string, unknown> };
+    };
+    cfg.agents.defaults.compaction = { mode: 'safeguard', maxHistoryShare: 0.5 };
+    return cfg;
+  }
+
+  beforeEach(() => {
+    mockModalConfirm.mockReset();
+    mockMessageSuccess.mockReset();
+    mockMessageError.mockReset();
+    useConfigStore.setState({
+      theme: 'dark',
+      locale: 'en',
+      systemPromptAppend: '',
+      bootState: 'ready',
+      pendingConfigRestart: false,
+      gatewayConfig: null,
+      gatewayConfigLoading: false,
+      _configRetryCount: 0,
+    });
+    useGatewayStore.setState({
+      client: createMockClient(),
+      state: 'connected',
+      serverVersion: '0.6.3',
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('enables the save button after editing maxHistoryShare (0.5 → 0.49)', () => {
+    useConfigStore.setState({ gatewayConfig: makeManualTuningConfig() });
+
+    render(<SettingsPanel />);
+    expect(getConfigSaveButton().disabled).toBe(true);
+
+    // Tuning inputs live inside the collapsed "advanced" panel; expand it first.
+    fireEvent.click(screen.getByText('settings.advancedTextEndpoint'));
+
+    // Two tuning inputs share the auto placeholder: [0] contextWindow, [1] maxHistoryShare.
+    const tuningInputs = screen.getAllByPlaceholderText('settings.tuning.autoPlaceholder');
+    expect(tuningInputs).toHaveLength(2);
+    fireEvent.change(tuningInputs[1], { target: { value: '0.49' } });
+    fireEvent.blur(tuningInputs[1]);
+
+    expect(getConfigSaveButton().disabled).toBe(false);
+  });
+
+  it('enables the save button after editing the context window', () => {
+    useConfigStore.setState({ gatewayConfig: makeManualTuningConfig() });
+
+    render(<SettingsPanel />);
+    expect(getConfigSaveButton().disabled).toBe(true);
+
+    fireEvent.click(screen.getByText('settings.advancedTextEndpoint'));
+
+    const tuningInputs = screen.getAllByPlaceholderText('settings.tuning.autoPlaceholder');
+    fireEvent.change(tuningInputs[0], { target: { value: '48000' } });
+    fireEvent.blur(tuningInputs[0]);
+
+    expect(getConfigSaveButton().disabled).toBe(false);
+  });
+});
+
+// ============================================================
 // Task 2: independent vision endpoint + protocol auto-align
 // ============================================================
 
