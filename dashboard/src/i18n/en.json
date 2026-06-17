@@ -666,20 +666,13 @@
     "visionInheritsText": "Vision uses the text endpoint. To use a separate endpoint, pick or create a different configuration.",
     "tuning": {
       "contextWindow": "Context Window (tokens)",
-      "contextWindowHint": "Custom/local endpoints only. Leave empty to let OpenClaw's catalog or the preset decide. A wrong value triggers compaction too early or too late.",
-      "maxHistoryShare": "Max History Share (whole session)",
-      "maxHistoryShareHint": "Maximum fraction of the context window post-compaction history may occupy (0.1–0.9); applies to the whole session. Leave empty for OpenClaw's default.",
+      "contextWindowHint": "Custom/local endpoints only. Leave empty to let OpenClaw's catalog or the preset decide. Research-Claw requires a context window of at least {{min}} tokens — models below this are not supported and will be run at {{min}}. Research-Claw manages the compaction strategy for you.",
       "autoPlaceholder": "Auto",
+      "contextWindowClamped": "Research-Claw does not support context windows below {{min}} tokens — automatically running at {{min}}.",
       "error": {
         "contextWindow": {
           "notInteger": "Context window must be an integer",
-          "outOfRange": "Context window out of range (8192–2000000)"
-        },
-        "maxHistoryShare": {
-          "outOfRange": "Max history share must be between 0.1 and 0.9"
-        },
-        "compaction": {
-          "unrecoverable": "This context window / max history share combination prevents auto-compaction from recovering (pruned history still exceeds the budget, so the session re-triggers compaction forever). Raise the context window or lower the max history share."
+          "outOfRange": "Context window is too large (max 2000000)"
         }
       }
     },

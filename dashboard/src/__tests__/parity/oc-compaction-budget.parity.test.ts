@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createRequire } from 'node:module';
 import {
   compactionCanRecover,
+  CONTEXT_WINDOW_MIN,
   OC_DEFAULT_CONTEXT_WINDOW,
 } from '../../utils/config-patch';
 
@@ -90,5 +92,83 @@ describe.skipIf(!ocPresent)('mirror equals live openclaw source', () => {
     expect(num('agent-compaction-constants.ts', 'MIN_PROMPT_BUDGET_TOKENS')).toBe(OC.MIN_PROMPT_BUDGET_TOKENS);
     expect(num('agent-compaction-constants.ts', 'MIN_PROMPT_BUDGET_RATIO')).toBe(OC.MIN_PROMPT_BUDGET_RATIO);
     expect(num('compaction-planning.ts', 'SAFETY_MARGIN')).toBe(OC.SAFETY_MARGIN);
+  });
+});
+
+// ── Turn-1 overflow parity: drive OC's REAL preemptive-compaction precheck ──
+// The recoverability math above governs whether *self-compaction* loops; this
+// block proves the orthogonal turn-1 failure (a NEW "你好" session overflowing
+// before any history exists) and that the CONTEXT_WINDOW_MIN floor flips OC's real
+// decision from overflow → fits. The earlier adaptive-reserve approach was removed:
+// OC pins the turn-1 precheck reserve at its own default (getCompactionReserveTokens()
+// ?? 16384), ignoring agents.defaults.compaction.reserveTokens in the embedded path,
+// so the only lever that moves the precheck is the context window itself. Verified
+// live: at window=32000 OC logged estimatedPromptTokens=20129 / reserveTokens=16384
+// / "Context overflow ... (precheck)"; at window=40000 the same turn passed.
+// Gated on the installed openclaw package (absent in standalone CI).
+type OcRuntime = {
+  shouldPreemptivelyCompactBeforePrompt: (args: {
+    messages: unknown[];
+    systemPrompt: string;
+    prompt: string;
+    contextTokenBudget: number;
+    reserveTokens: number;
+  }) => { route: string };
+  estimateRenderedLlmBoundaryTokenPressure: (args: { systemPrompt: string; prompt: string }) => number;
+};
+let oc: OcRuntime | null = null;
+try {
+  oc = createRequire(import.meta.url)('openclaw/plugin-sdk/agent-harness-runtime') as OcRuntime;
+} catch {
+  oc = null;
+}
+
+// OC's turn-1 precheck reserve default, mirrored from the sessions runtime
+// getCompactionReserveTokens(): `return this.settings.compaction?.reserveTokens ?? 16384`.
+// This is NOT the 20000 self-compaction floor above — it is a separate, lower
+// default that governs the turn-1 precheck and is unaffected by RC config.
+const OC_TURN1_PRECHECK_RESERVE_TOKENS = 16_384;
+// RC's real turn-1 base prompt (system prompt + tools, no history), measured live
+// against the gateway with the default skill/tool set (estimatedPromptTokens=20129).
+// The floor must clear this at OC's fixed precheck reserve.
+const RC_REAL_BASE_PROMPT_TOKENS = 20_129;
+
+describe('CONTEXT_WINDOW_MIN clears OC turn-1 precheck arithmetic', () => {
+  it('the floor leaves room for the real base prompt at OC default precheck reserve', () => {
+    // window − reserve ≥ base prompt, with headroom left over for the first message.
+    const headroom = CONTEXT_WINDOW_MIN - OC_TURN1_PRECHECK_RESERVE_TOKENS - RC_REAL_BASE_PROMPT_TOKENS;
+    expect(headroom).toBeGreaterThanOrEqual(0);
+    // The old 32K floor did NOT clear it (negative headroom → turn-1 overflow).
+    expect(32_000 - OC_TURN1_PRECHECK_RESERVE_TOKENS - RC_REAL_BASE_PROMPT_TOKENS).toBeLessThan(0);
+  });
+});
+
+describe.skipIf(!oc)("CONTEXT_WINDOW_MIN flips OC's real turn-1 precheck (overflow → fits)", () => {
+  // Calibrate a synthetic system prompt to RC's real base-prompt size so we drive
+  // OC's actual estimator + route logic (not a mock) at ≥ the measured 20129 tokens.
+  const systemPrompt = 'x'.repeat(70_000);
+  const prompt = '你好';
+  const precheck = (contextTokenBudget: number) =>
+    oc!.shouldPreemptivelyCompactBeforePrompt({
+      messages: [],
+      systemPrompt,
+      prompt,
+      contextTokenBudget,
+      reserveTokens: OC_TURN1_PRECHECK_RESERVE_TOKENS,
+    }).route;
+
+  it('the synthetic prompt is calibrated to at least the real base-prompt size', () => {
+    expect(oc!.estimateRenderedLlmBoundaryTokenPressure({ systemPrompt, prompt })).toBeGreaterThanOrEqual(
+      RC_REAL_BASE_PROMPT_TOKENS,
+    );
+  });
+
+  it('the old 32K floor overflows turn-1, but CONTEXT_WINDOW_MIN fits — at OC fixed reserve', () => {
+    expect(precheck(32_000)).not.toBe('fits');
+    expect(precheck(CONTEXT_WINDOW_MIN)).toBe('fits');
+  });
+
+  it('a mainstream large window already fits at OC default reserve (RC writes no override)', () => {
+    expect(precheck(OC_DEFAULT_CONTEXT_WINDOW)).toBe('fits');
   });
 });

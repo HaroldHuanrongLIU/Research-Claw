@@ -19,6 +19,9 @@
  *  14. plugins.installs — provenance records for loaded plugins
  *  15. dangerouslyDisableDeviceAuth — remove (unnecessary on loopback)
  *  16. OC 2026.6.1 — legacy model APIs, bundledDiscovery, telegram streaming, DMS hooks
+ *  17. agents.defaults.compaction.maxHistoryShare — strip (defer to OC default 0.5)
+ *  18. models.providers.<manual>.models[].contextWindow — raise to ≥ 64000 floor
+ *  19. agents.defaults.compaction.reserveTokens/reserveTokensFloor — strip stale override
  */
 'use strict';
 
@@ -479,6 +482,56 @@ function ensureConfig(filePath) {
     if (c.plugins?.entries?.['claude-mem']) {
       delete c.plugins.entries['claude-mem'];
       changed = true;
+    }
+
+    // 17. Compaction history share — RC no longer exposes this knob and defers it
+    //     to OpenClaw's default (0.5). Strip any value written by an older RC
+    //     dashboard so existing users get the default behavior with no stale cap.
+    const compaction = c.agents?.defaults?.compaction;
+    if (compaction && typeof compaction === 'object' && compaction.maxHistoryShare !== undefined) {
+      delete compaction.maxHistoryShare;
+      changed = true;
+    }
+
+    // 18. Context window floor — RC requires ≥ 64000 (CONTEXT_WINDOW_MIN in
+    //     dashboard/src/utils/config-patch.ts). OC pins the turn-1 precheck reserve
+    //     at a hardcoded 16384, so a manually-pinned window below ~36.5K overflows on
+    //     the very first "你好" before any history exists. Raise any sub-floor window an
+    //     older RC saved for a MANUAL endpoint (local ollama/vllm + custom-* API
+    //     profiles); preset/OC-known providers are left to the startup aligner so their
+    //     real catalog window is never inflated.
+    const RC_CONTEXT_WINDOW_MIN = 64000; // keep in sync with CONTEXT_WINDOW_MIN
+    const isManualProviderKey = (key) =>
+      key === 'ollama' || key === 'vllm' || key === 'custom' || key.startsWith('custom-');
+    if (providers && typeof providers === 'object') {
+      for (const [key, prov] of Object.entries(providers)) {
+        if (!isManualProviderKey(key) || !prov || typeof prov !== 'object') continue;
+        if (!Array.isArray(prov.models)) continue;
+        for (const m of prov.models) {
+          if (
+            m && typeof m === 'object' &&
+            typeof m.contextWindow === 'number' &&
+            m.contextWindow < RC_CONTEXT_WINDOW_MIN
+          ) {
+            m.contextWindow = RC_CONTEXT_WINDOW_MIN;
+            changed = true;
+          }
+        }
+      }
+    }
+
+    // 19. Stale compaction reserve override — an older RC build briefly wrote
+    //     reserveTokens/reserveTokensFloor; the dashboard no longer does and OC ignores
+    //     them on the turn-1 precheck path anyway. Strip to keep the config clean.
+    if (compaction && typeof compaction === 'object') {
+      if (compaction.reserveTokens !== undefined) {
+        delete compaction.reserveTokens;
+        changed = true;
+      }
+      if (compaction.reserveTokensFloor !== undefined) {
+        delete compaction.reserveTokensFloor;
+        changed = true;
+      }
     }
   }
 

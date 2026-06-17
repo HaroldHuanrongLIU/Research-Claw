@@ -2,16 +2,15 @@ import { describe, it, expect, afterEach } from 'vitest';
 import {
   resolveModelDef,
   validateModelTuning,
+  clampSavedContextWindow,
   isManualModelEndpoint,
   buildSaveConfig,
   extractProviderFieldsForEditor,
-  extractConfigFields,
   compactionCanRecover,
   CONTEXT_WINDOW_MIN,
   CONTEXT_WINDOW_MAX,
   OC_DEFAULT_CONTEXT_WINDOW,
   type ConfigPatchInput,
-  type ModelTuningInput,
 } from './config-patch';
 import { setModelCatalogCache } from './catalog-cache';
 import { alignConfigModels, type RcModelCard } from './oc-catalog-align';
@@ -102,86 +101,57 @@ describe('compactionCanRecover — mirrors OC compaction budget math', () => {
   });
 });
 
-describe('validateModelTuning — compaction-unrecoverable 防呆', () => {
-  const codes = (i: ModelTuningInput) => validateModelTuning(i).map((x) => x.code);
-
-  it('flags a pinned window too small to ever recover', () => {
-    const issues = validateModelTuning({ contextWindow: 32_000 });
-    expect(issues).toHaveLength(1);
-    expect(issues[0]).toEqual({ field: 'contextWindow', code: 'compaction.unrecoverable' });
-  });
-
-  it('does NOT flag a window that recovers', () => {
-    expect(codes({ contextWindow: 128_000 })).not.toContain('compaction.unrecoverable');
-    expect(codes({ contextWindow: 64_000 })).not.toContain('compaction.unrecoverable');
-  });
-
-  it('clears the flag once the user lowers the history share', () => {
-    expect(codes({ contextWindow: 32_000, maxHistoryShare: 0.5 })).toContain('compaction.unrecoverable');
-    expect(codes({ contextWindow: 32_000, maxHistoryShare: 0.3 })).not.toContain('compaction.unrecoverable');
-  });
-
-  it('flags a too-high share even at the default window (attributed to share)', () => {
-    const issues = validateModelTuning({ maxHistoryShare: 0.9 });
-    expect(issues).toContainEqual({ field: 'maxHistoryShare', code: 'compaction.unrecoverable' });
-  });
-
-  it('does not run when a field already failed range/integer validation', () => {
-    // out-of-range window must not also emit the compaction code (single, clear error).
-    expect(codes({ contextWindow: 1_000 })).toEqual(['contextWindow.outOfRange']);
-  });
-
-  it('the empty form (all auto) is never flagged', () => {
+describe('validateModelTuning — 防蠢 (contextWindow is the only knob)', () => {
+  it('passes for a sane window and for the empty (all-auto) form', () => {
+    expect(validateModelTuning({ contextWindow: 128_000 })).toEqual([]);
     expect(validateModelTuning({})).toEqual([]);
+  });
+
+  it('rejects a non-integer contextWindow', () => {
+    expect(validateModelTuning({ contextWindow: 1024.5 }).map((i) => i.code)).toEqual([
+      'contextWindow.notInteger',
+    ]);
+  });
+
+  it('rejects a contextWindow above the hard maximum', () => {
+    expect(validateModelTuning({ contextWindow: CONTEXT_WINDOW_MAX + 1 }).map((i) => i.code)).toEqual([
+      'contextWindow.outOfRange',
+    ]);
+  });
+
+  it('does NOT flag a sub-floor window — that is auto-raised on save, not an error', () => {
+    // The save-time clamp (clampSavedContextWindow) owns the floor; validation stays
+    // silent so the user is never blocked, only nudged via toast.
+    expect(validateModelTuning({ contextWindow: CONTEXT_WINDOW_MIN - 1 })).toEqual([]);
+    expect(validateModelTuning({ contextWindow: 1_000 })).toEqual([]);
+  });
+
+  it('accepts the exact upper bound', () => {
+    expect(validateModelTuning({ contextWindow: CONTEXT_WINDOW_MAX })).toEqual([]);
   });
 });
 
-describe('validateModelTuning — 防蠢', () => {
-  it('passes for a sane tuple', () => {
-    expect(
-      validateModelTuning({ contextWindow: 128_000, maxHistoryShare: 0.5 }),
-    ).toEqual([]);
+describe('clampSavedContextWindow — floor enforcement with a clamp signal', () => {
+  it('passes through an empty (auto) window untouched', () => {
+    expect(clampSavedContextWindow(undefined)).toEqual({ value: undefined, clamped: false });
+    expect(clampSavedContextWindow(null)).toEqual({ value: undefined, clamped: false });
+    expect(clampSavedContextWindow(NaN)).toEqual({ value: undefined, clamped: false });
   });
 
-  it('passes when fields are omitted', () => {
-    expect(validateModelTuning({})).toEqual([]);
+  it('raises a sub-floor window to CONTEXT_WINDOW_MIN and flags the clamp', () => {
+    expect(clampSavedContextWindow(8_000)).toEqual({ value: CONTEXT_WINDOW_MIN, clamped: true });
+    expect(clampSavedContextWindow(CONTEXT_WINDOW_MIN - 1)).toEqual({
+      value: CONTEXT_WINDOW_MIN,
+      clamped: true,
+    });
   });
 
-  it('rejects a non-integer / out-of-range contextWindow', () => {
-    expect(validateModelTuning({ contextWindow: 1024.5 }).map((i) => i.code)).toContain(
-      'contextWindow.notInteger',
-    );
-    expect(validateModelTuning({ contextWindow: CONTEXT_WINDOW_MIN - 1 }).map((i) => i.code)).toContain(
-      'contextWindow.outOfRange',
-    );
-    expect(validateModelTuning({ contextWindow: CONTEXT_WINDOW_MAX + 1 }).map((i) => i.code)).toContain(
-      'contextWindow.outOfRange',
-    );
-  });
-
-  it('accepts the exact range bounds (no range error)', () => {
-    // The MIN window only fits OC's compaction budget at a conservative share, so
-    // pair it with one; the assertion here is that the *range* check accepts it.
-    expect(validateModelTuning({ contextWindow: CONTEXT_WINDOW_MIN, maxHistoryShare: 0.4 })).toEqual([]);
-    expect(validateModelTuning({ contextWindow: CONTEXT_WINDOW_MAX })).toEqual([]);
-  });
-
-  it('keeps maxHistoryShare within OC range 0.1–0.9', () => {
-    expect(validateModelTuning({ maxHistoryShare: 0.05 }).map((i) => i.code)).toContain(
-      'maxHistoryShare.outOfRange',
-    );
-    expect(validateModelTuning({ maxHistoryShare: 0.95 }).map((i) => i.code)).toContain(
-      'maxHistoryShare.outOfRange',
-    );
-    // In-range shares produce no *range* error. (0.9 is in range but trips the
-    // separate compaction-recoverability guard — covered in its own block below,
-    // because share × SAFETY_MARGIN ≥ 1 can never recover.)
-    expect(validateModelTuning({ maxHistoryShare: 0.1 }).map((i) => i.code)).not.toContain(
-      'maxHistoryShare.outOfRange',
-    );
-    expect(validateModelTuning({ maxHistoryShare: 0.9 }).map((i) => i.code)).not.toContain(
-      'maxHistoryShare.outOfRange',
-    );
+  it('keeps an at-or-above-floor window and floors fractions without flagging', () => {
+    expect(clampSavedContextWindow(CONTEXT_WINDOW_MIN)).toEqual({
+      value: CONTEXT_WINDOW_MIN,
+      clamped: false,
+    });
+    expect(clampSavedContextWindow(96_000.7)).toEqual({ value: 96_000, clamped: false });
   });
 });
 
@@ -213,20 +183,26 @@ describe('buildSaveConfig — manual window + global compaction (拉通)', () =>
     expect(card.contextWindow).not.toBe(999_999);
   });
 
-  it('writes the global history-share knob and preserves mode:safeguard', () => {
-    const cfg = buildSaveConfig(
-      null,
-      baseInput({ compactionMaxHistoryShare: 0.6 }),
-    );
+  it('writes no reserve keys for a small window (reserve is OC-owned, floor guarantees turn-1)', () => {
+    // RC no longer tunes the compaction reserve — OC pins the turn-1 precheck reserve
+    // at its own default regardless of config, so the CONTEXT_WINDOW_MIN floor is what
+    // guarantees turn-1 fits. Any manual window writes only mode:safeguard.
+    const cfg = buildSaveConfig(null, baseInput({ customContextWindow: 32_000 }));
     const compaction = (
       (cfg.agents as { defaults: { compaction: Record<string, unknown> } }).defaults.compaction
     );
-    expect(compaction.reserveTokens).toBeUndefined();
-    expect(compaction.maxHistoryShare).toBe(0.6);
-    expect(compaction.mode).toBe('safeguard');
+    expect(compaction).toEqual({ mode: 'safeguard' });
   });
 
-  it('leaves compaction untouched when no knob is provided', () => {
+  it('writes no reserve keys for a large window (mainstream untouched, OC default 20000)', () => {
+    const cfg = buildSaveConfig(null, baseInput({ customContextWindow: 200_000 }));
+    const compaction = (
+      (cfg.agents as { defaults: { compaction: Record<string, unknown> } }).defaults.compaction
+    );
+    expect(compaction).toEqual({ mode: 'safeguard' });
+  });
+
+  it('leaves only mode:safeguard when no manual window is provided (auto)', () => {
     const cfg = buildSaveConfig(null, baseInput());
     const compaction = (
       (cfg.agents as { defaults: { compaction: Record<string, unknown> } }).defaults.compaction
@@ -234,12 +210,41 @@ describe('buildSaveConfig — manual window + global compaction (拉通)', () =>
     expect(compaction).toEqual({ mode: 'safeguard' });
   });
 
+  it('always strips any prior maxHistoryShare (RC defers it to OC default 0.5)', () => {
+    const current: Record<string, unknown> = {
+      agents: { defaults: { compaction: { mode: 'safeguard', maxHistoryShare: 0.7 } } },
+    };
+    const cfg = buildSaveConfig(current, baseInput());
+    const compaction = (
+      (cfg.agents as { defaults: { compaction: Record<string, unknown> } }).defaults.compaction
+    );
+    expect(compaction.maxHistoryShare).toBeUndefined();
+    expect(compaction.mode).toBe('safeguard');
+  });
+
+  it('always clears any prior RC-written reserve keys (reserve deferred to OC)', () => {
+    const current: Record<string, unknown> = {
+      agents: {
+        defaults: {
+          compaction: { mode: 'safeguard', reserveTokens: 12_000, reserveTokensFloor: 12_000 },
+        },
+      },
+    };
+    // Window-independent: stale reserve keys are stripped even for a small window.
+    const cfg = buildSaveConfig(current, baseInput({ customContextWindow: 32_000 }));
+    const compaction = (
+      (cfg.agents as { defaults: { compaction: Record<string, unknown> } }).defaults.compaction
+    );
+    expect(compaction.reserveTokens).toBeUndefined();
+    expect(compaction.reserveTokensFloor).toBeUndefined();
+  });
+
   it('round-trips: manual card survives the startup aligner and reads back identically', () => {
     setModelCatalogCache(ocModelsListAllPayload.models);
     // Use an id OC knows under another provider so a non-manual card WOULD be re-aligned.
     const cfg = buildSaveConfig(
       null,
-      baseInput({ textModel: 'gpt-5.4', customContextWindow: 64_000, compactionMaxHistoryShare: 0.5 }),
+      baseInput({ textModel: 'gpt-5.4', customContextWindow: 64_000 }),
     );
 
     // Startup aligner must not touch the manual-endpoint card — wired exactly as
@@ -254,9 +259,6 @@ describe('buildSaveConfig — manual window + global compaction (拉通)', () =>
     const providerFields = extractProviderFieldsForEditor(aligned, 'custom-relay');
     expect(providerFields?.contextWindow).toBe(64_000);
     expect(providerFields?.contextWindowManual).toBe(true);
-
-    const fields = extractConfigFields(aligned);
-    expect(fields.compactionMaxHistoryShare).toBe(0.5);
   });
 
   it('manual protection is by provider key, not a pinned window', () => {

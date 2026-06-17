@@ -35,10 +35,10 @@ import {
   mergeProjectConfigsPreservingProviders,
   serializeConfigForGatewayApply,
   validateModelTuning,
+  clampSavedContextWindow,
   CONTEXT_WINDOW_MIN,
   CONTEXT_WINDOW_MAX,
-  MAX_HISTORY_SHARE_MIN,
-  MAX_HISTORY_SHARE_MAX,
+  CONTEXT_WINDOW_INPUT_MIN,
 } from '../../utils/config-patch';
 import {
   allocateNextProfileProviderId,
@@ -519,7 +519,6 @@ export default function SettingsPanel() {
   // text contextWindow + the global compaction knobs that size the whole-session
   // preemptive-compaction trigger. null = leave to OC/preset defaults.
   const [customContextWindow, setCustomContextWindow] = useState<number | null>(null);
-  const [compactionMaxHistoryShare, setCompactionMaxHistoryShare] = useState<number | null>(null);
 
   // --- Supervisor (dual-model) ---
   const supervisorStatus = useSupervisorStore((s) => s.status);
@@ -803,11 +802,10 @@ export default function SettingsPanel() {
     () =>
       JSON.stringify([
         provider, baseUrl, api, apiKey, textModel,
-        // Model tuning (context window / history share) only reaches the saved
-        // config for manual endpoints (see buildSaveConfig), so normalize away for
-        // presets — otherwise a stale tuning value dirties the form on preset switch.
+        // The context window only reaches the saved config for manual endpoints
+        // (see buildSaveConfig), so normalize away for presets — otherwise a stale
+        // tuning value dirties the form on preset switch.
         isManualModelEndpoint(provider) ? customContextWindow : null,
-        isManualModelEndpoint(provider) ? compactionMaxHistoryShare : null,
         visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey,
         proxyEnabled, proxyUrl,
         webSearchEnabled, webSearchProvider, webSearchApiKey,
@@ -822,7 +820,7 @@ export default function SettingsPanel() {
       ]),
     [
       provider, baseUrl, api, apiKey, textModel,
-      customContextWindow, compactionMaxHistoryShare,
+      customContextWindow,
       visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey,
       proxyEnabled, proxyUrl,
       webSearchEnabled, webSearchProvider, webSearchApiKey,
@@ -1368,8 +1366,6 @@ export default function SettingsPanel() {
     setHeartbeatEnabled(fields.heartbeatEnabled);
     setHeartbeatInterval(fields.heartbeatInterval);
 
-    // Global compaction knobs.
-    setCompactionMaxHistoryShare(fields.compactionMaxHistoryShare ?? null);
     // Per-text-provider manual window (prefill only when pinned).
     const textProviderFields = extractProviderFieldsForEditor(configForEditor, fields.provider);
     setCustomContextWindow(
@@ -1503,14 +1499,19 @@ export default function SettingsPanel() {
         }
       }
 
-      // 防蠢: only manual endpoints expose these knobs; reject absurd values
-      // before they can mis-size the compaction trigger.
+      // Only manual endpoints expose the context window. A sub-floor value is
+      // auto-raised to CONTEXT_WINDOW_MIN (with a toast) so RC always has room for
+      // its turn-1 base prompt; malformed/oversized values are still rejected.
       const manualEndpoint = isManualModelEndpoint(provider);
+      let effectiveContextWindow = customContextWindow ?? undefined;
       if (manualEndpoint) {
-        const tuningIssues = validateModelTuning({
-          contextWindow: customContextWindow ?? undefined,
-          maxHistoryShare: compactionMaxHistoryShare ?? undefined,
-        });
+        const { value: clampedWindow, clamped } = clampSavedContextWindow(customContextWindow);
+        if (clamped && clampedWindow !== undefined) {
+          effectiveContextWindow = clampedWindow;
+          setCustomContextWindow(clampedWindow);
+          message.warning(t('settings.tuning.contextWindowClamped', { min: CONTEXT_WINDOW_MIN }));
+        }
+        const tuningIssues = validateModelTuning({ contextWindow: effectiveContextWindow });
         if (tuningIssues.length > 0) {
           throw new Error(tuningIssues.map((i) => t(`settings.tuning.error.${i.code}`)).join('; '));
         }
@@ -1524,8 +1525,7 @@ export default function SettingsPanel() {
           api,
           apiKey: apiKeyToSend,
           textModel: textModel.trim(),
-          customContextWindow: manualEndpoint ? customContextWindow ?? undefined : undefined,
-          compactionMaxHistoryShare: manualEndpoint ? compactionMaxHistoryShare ?? undefined : undefined,
+          customContextWindow: manualEndpoint ? effectiveContextWindow : undefined,
           visionEnabled,
           visionProvider: visionEnabled ? visionProvider : undefined,
           visionModel: visionEnabled ? (visionModel.trim() || null) : null,
@@ -1601,7 +1601,7 @@ export default function SettingsPanel() {
     } finally {
       setSaving(false);
     }
-  }, [baseUrl, api, apiKey, provider, textModel, customContextWindow, compactionMaxHistoryShare, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, heartbeatEnabled, heartbeatInterval, supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel, reviewMode, appendReviewToChannelOutput, deviationThreshold, forceRegenerate, maxRegenerateAttempts, t, refreshAuthStatuses, supportsAuthProfiles]);
+  }, [baseUrl, api, apiKey, provider, textModel, customContextWindow, visionEnabled, visionProvider, visionModel, visionBaseUrl, visionApi, visionApiKey, visionSeparateProvider, proxyEnabled, proxyUrl, webSearchEnabled, webSearchProvider, webSearchApiKey, webSearchApiKeyConfigured, heartbeatEnabled, heartbeatInterval, supervisorEnabled, supervisorProvider, supervisorModelId, supervisorUseMainModel, reviewMode, appendReviewToChannelOutput, deviationThreshold, forceRegenerate, maxRegenerateAttempts, t, refreshAuthStatuses, supportsAuthProfiles]);
 
   const applyConfigFieldsToForm = useCallback((configForEditor: Record<string, unknown>) => {
     const fields = extractConfigFields(configForEditor);
@@ -2088,42 +2088,23 @@ export default function SettingsPanel() {
                 )}
 
                 {isManualModelEndpoint(provider) && (
-                  <>
-                    <SettingRow
-                      label={t('settings.tuning.contextWindow')}
-                      description={t('settings.tuning.contextWindowHint')}
-                      vertical
-                    >
-                      <InputNumber
-                        value={customContextWindow}
-                        onChange={(v) => setCustomContextWindow(typeof v === 'number' ? v : null)}
-                        size="small"
-                        style={{ width: '100%' }}
-                        min={CONTEXT_WINDOW_MIN}
-                        max={CONTEXT_WINDOW_MAX}
-                        step={1024}
-                        precision={0}
-                        placeholder={t('settings.tuning.autoPlaceholder')}
-                      />
-                    </SettingRow>
-
-                    <SettingRow
-                      label={t('settings.tuning.maxHistoryShare')}
-                      description={t('settings.tuning.maxHistoryShareHint')}
-                      vertical
-                    >
-                      <InputNumber
-                        value={compactionMaxHistoryShare}
-                        onChange={(v) => setCompactionMaxHistoryShare(typeof v === 'number' ? v : null)}
-                        size="small"
-                        style={{ width: '100%' }}
-                        min={MAX_HISTORY_SHARE_MIN}
-                        max={MAX_HISTORY_SHARE_MAX}
-                        step={0.05}
-                        placeholder={t('settings.tuning.autoPlaceholder')}
-                      />
-                    </SettingRow>
-                  </>
+                  <SettingRow
+                    label={t('settings.tuning.contextWindow')}
+                    description={t('settings.tuning.contextWindowHint', { min: CONTEXT_WINDOW_MIN })}
+                    vertical
+                  >
+                    <InputNumber
+                      value={customContextWindow}
+                      onChange={(v) => setCustomContextWindow(typeof v === 'number' ? v : null)}
+                      size="small"
+                      style={{ width: '100%' }}
+                      min={CONTEXT_WINDOW_INPUT_MIN}
+                      max={CONTEXT_WINDOW_MAX}
+                      step={1024}
+                      precision={0}
+                      placeholder={t('settings.tuning.autoPlaceholder')}
+                    />
+                  </SettingRow>
                 )}
               </>
             ),

@@ -1021,32 +1021,29 @@ describe('Save button dirty gating', () => {
 });
 
 // ============================================================
-// Model tuning fields (context window / history share) must dirty the form.
-// Regression: editing these once left the Save button stuck disabled because
-// they were absent from the dirty signature (formSignature).
+// Model tuning field (context window) must dirty the form, and a sub-floor
+// window is auto-raised to the floor on save with a toast (never blocked).
+// Regression: editing the window once left the Save button stuck disabled
+// because it was absent from the dirty signature (formSignature).
 // ============================================================
 
-describe('Model tuning fields dirty gating', () => {
+describe('Model tuning field dirty gating + save-time clamp', () => {
   function getConfigSaveButton(): HTMLButtonElement {
     const saveButtons = screen.getAllByRole('button', { name: /settings\.save|setup\.gatewayRestarting/i });
     const btn = saveButtons.find((b) => b.parentElement?.textContent?.includes('settings.restartHint')) ?? saveButtons[0];
     return btn as HTMLButtonElement;
   }
 
-  // Manual endpoint (ollama) so the tuning inputs render; a saved maxHistoryShare
-  // gives the field a real baseline to edit away from.
+  // Manual endpoint (ollama) so the contextWindow input renders.
   function makeManualTuningConfig() {
-    const cfg = makeGatewayConfig('m1', 'ollama', 'http://localhost:11434/v1') as unknown as {
-      agents: { defaults: Record<string, unknown> };
-    };
-    cfg.agents.defaults.compaction = { mode: 'safeguard', maxHistoryShare: 0.5 };
-    return cfg;
+    return makeGatewayConfig('m1', 'ollama', 'http://localhost:11434/v1');
   }
 
   beforeEach(() => {
     mockModalConfirm.mockReset();
     mockMessageSuccess.mockReset();
     mockMessageError.mockReset();
+    mockMessageWarning.mockReset();
     useConfigStore.setState({
       theme: 'dark',
       locale: 'en',
@@ -1068,37 +1065,71 @@ describe('Model tuning fields dirty gating', () => {
     vi.restoreAllMocks();
   });
 
-  it('enables the save button after editing maxHistoryShare (0.5 → 0.49)', () => {
-    useConfigStore.setState({ gatewayConfig: makeManualTuningConfig() });
-
-    render(<SettingsPanel />);
-    expect(getConfigSaveButton().disabled).toBe(true);
-
-    // Tuning inputs live inside the collapsed "advanced" panel; expand it first.
-    fireEvent.click(screen.getByText('settings.advancedTextEndpoint'));
-
-    // Two tuning inputs share the auto placeholder: [0] contextWindow, [1] maxHistoryShare.
-    const tuningInputs = screen.getAllByPlaceholderText('settings.tuning.autoPlaceholder');
-    expect(tuningInputs).toHaveLength(2);
-    fireEvent.change(tuningInputs[1], { target: { value: '0.49' } });
-    fireEvent.blur(tuningInputs[1]);
-
-    expect(getConfigSaveButton().disabled).toBe(false);
-  });
-
   it('enables the save button after editing the context window', () => {
     useConfigStore.setState({ gatewayConfig: makeManualTuningConfig() });
 
     render(<SettingsPanel />);
     expect(getConfigSaveButton().disabled).toBe(true);
 
+    // The tuning input lives inside the collapsed "advanced" panel; expand it first.
     fireEvent.click(screen.getByText('settings.advancedTextEndpoint'));
 
+    // Only one tuning input now (contextWindow); the history-share knob was removed.
     const tuningInputs = screen.getAllByPlaceholderText('settings.tuning.autoPlaceholder');
+    expect(tuningInputs).toHaveLength(1);
     fireEvent.change(tuningInputs[0], { target: { value: '48000' } });
     fireEvent.blur(tuningInputs[0]);
 
     expect(getConfigSaveButton().disabled).toBe(false);
+  });
+
+  it('auto-raises a sub-floor window to the floor on save, toasts, and writes no reserve override', async () => {
+    const mockRequest = vi.fn().mockImplementation((method: string) => {
+      if (method === 'rc.auth.statuses') return Promise.resolve({});
+      if (method === 'config.get') {
+        return Promise.resolve({ config: makeManualTuningConfig(), hash: 'hash-clamp' });
+      }
+      if (method === 'rc.provider.upsert') return Promise.resolve({});
+      if (method === 'config.apply') return Promise.resolve({});
+      return Promise.resolve({});
+    });
+    useGatewayStore.setState({ client: createMockClient(mockRequest) });
+    useConfigStore.setState({ gatewayConfig: makeManualTuningConfig() });
+
+    render(<SettingsPanel />);
+    fireEvent.click(screen.getByText('settings.advancedTextEndpoint'));
+
+    // Enter a window below CONTEXT_WINDOW_MIN (64000). The input min is intentionally
+    // low (1024) so the value survives blur and the save-time clamp is what raises it.
+    const tuningInput = screen.getAllByPlaceholderText('settings.tuning.autoPlaceholder')[0];
+    fireEvent.change(tuningInput, { target: { value: '8000' } });
+    fireEvent.blur(tuningInput);
+
+    clickConfigSaveButton();
+    const confirmCall = mockModalConfirm.mock.calls[0][0] as { onOk: () => Promise<void> };
+    await act(async () => {
+      await confirmCall.onOk();
+    });
+
+    // A warning toast (i18n key) tells the user the window was raised to the floor.
+    expect(mockMessageWarning).toHaveBeenCalledWith('settings.tuning.contextWindowClamped');
+
+    const upsertCall = mockRequest.mock.calls.find((c: unknown[]) => c[0] === 'rc.provider.upsert');
+    expect(upsertCall).toBeTruthy();
+    const desired = (upsertCall?.[1] as { desiredConfig: Record<string, unknown> }).desiredConfig;
+    const card = (
+      (desired.models as { providers: Record<string, { models: Array<{ contextWindow?: number }> }> })
+        .providers.ollama.models[0]
+    );
+    expect(card.contextWindow).toBe(64_000);
+
+    const compaction = (
+      (desired.agents as { defaults: { compaction: Record<string, unknown> } }).defaults.compaction
+    );
+    // Reserve is OC-owned now; RC writes only the strategy mode.
+    expect(compaction.reserveTokens).toBeUndefined();
+    expect(compaction.reserveTokensFloor).toBeUndefined();
+    expect(compaction.maxHistoryShare).toBeUndefined();
   });
 });
 

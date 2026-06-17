@@ -80,8 +80,6 @@ export interface ConfigPatchInput {
    * persisted (OC's model schema is strict and rejects unknown keys).
    */
   customContextWindow?: number;
-  /** Global compaction history cap → agents.defaults.compaction.maxHistoryShare (0.1–0.9). */
-  compactionMaxHistoryShare?: number;
 
   /**
    * Restore additional provider entries that might be missing from
@@ -131,8 +129,6 @@ export interface ExtractedConfig {
   heartbeatEnabled: boolean;
   /** Current heartbeat interval (e.g. "30m", "1h") */
   heartbeatInterval: string;
-  /** Global agents.defaults.compaction.maxHistoryShare (undefined when unset). */
-  compactionMaxHistoryShare?: number;
 }
 
 function cleanUrl(url: string): string {
@@ -185,10 +181,25 @@ export function isManualModelEndpoint(providerKey: string): boolean {
   return isLocalProvider(providerKey) || isApiProfileProviderKey(providerKey);
 }
 
-/** Hard bounds for a user-pinned contextWindow (防蠢: reject absurd values). */
-export const CONTEXT_WINDOW_MIN = 8_192;
+/**
+ * RC-enforced minimum for a user-pinned contextWindow. OC's turn-1 precheck pins
+ * the compaction reserve at its default (16384) regardless of config — config keys
+ * like reserveTokens never reach the embedded precheck path — so a window below
+ * ~36.5K (16384 reserve + RC's ~20.1K measured base prompt) overflows on the very
+ * first "你好". The floor is sized to clear that base prompt plus headroom for the
+ * first user message; a smaller value is auto-raised to this floor on save (with a
+ * toast) rather than blocked. See clampSavedContextWindow.
+ */
+export const CONTEXT_WINDOW_MIN = 64_000;
+/** Upper guard for a user-pinned contextWindow (防蠢: reject absurd values). */
 export const CONTEXT_WINDOW_MAX = 2_000_000;
-/** OC's accepted range for compaction.maxHistoryShare. */
+/**
+ * Technical floor for the contextWindow input control only. Kept well below
+ * CONTEXT_WINDOW_MIN so a user can still type a sub-floor value — the save-time
+ * clamp is what raises it to CONTEXT_WINDOW_MIN and surfaces the toast.
+ */
+export const CONTEXT_WINDOW_INPUT_MIN = 1_024;
+/** OC's accepted range for compaction.maxHistoryShare (RC no longer exposes it). */
 export const MAX_HISTORY_SHARE_MIN = 0.1;
 export const MAX_HISTORY_SHARE_MAX = 0.9;
 
@@ -216,6 +227,25 @@ const OC_COMPACTION_MIN_PROMPT_BUDGET_TOKENS = 8_000;
 const OC_COMPACTION_MIN_PROMPT_BUDGET_RATIO = 0.5;
 const OC_COMPACTION_SAFETY_MARGIN = 1.2;
 const OC_DEFAULT_MAX_HISTORY_SHARE = 0.5;
+
+/**
+ * Normalize a user-entered context window for saving. An empty value stays
+ * "auto" (OC/preset owns the window). A finite value below CONTEXT_WINDOW_MIN is
+ * raised to the floor and flagged so the UI can toast — RC trusts the user's
+ * window as ground truth but refuses a window that cannot fit its own base prompt.
+ */
+export function clampSavedContextWindow(
+  raw: number | null | undefined,
+): { value: number | undefined; clamped: boolean } {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+    return { value: undefined, clamped: false };
+  }
+  const v = Math.floor(raw);
+  if (v < CONTEXT_WINDOW_MIN) {
+    return { value: CONTEXT_WINDOW_MIN, clamped: true };
+  }
+  return { value: v, clamped: false };
+}
 
 /**
  * Predict whether OC's self-compaction can recover for a given context window
@@ -248,62 +278,33 @@ export function compactionCanRecover(contextWindow: number, maxHistoryShare?: nu
 
 export interface ModelTuningInput {
   contextWindow?: number;
-  maxHistoryShare?: number;
 }
 
 export interface ModelTuningIssue {
-  field: 'contextWindow' | 'maxHistoryShare';
+  field: 'contextWindow';
   /** i18n-mappable reason code. */
-  code:
-    | 'contextWindow.notInteger'
-    | 'contextWindow.outOfRange'
-    | 'maxHistoryShare.outOfRange'
-    | 'compaction.unrecoverable';
+  code: 'contextWindow.notInteger' | 'contextWindow.outOfRange';
 }
 
 const isFiniteInt = (n: unknown): n is number =>
   typeof n === 'number' && Number.isFinite(n) && Number.isInteger(n);
 
 /**
- * Pure 防蠢 validation for the manual-endpoint tuning knobs. Returns an empty
- * array when valid. The contextWindow is the only value OC cannot infer for a
- * custom endpoint; reserveTokens is left to OC's own floor so the user cannot
- * pin a non-positive usable budget — the original "compaction timeout" footgun.
+ * Pure 防蠢 validation for the only user-tunable knob, contextWindow. A sub-floor
+ * window is NOT an error here — it is auto-raised on save by clampSavedContextWindow
+ * (RC trusts the user's window as ground truth, only enforcing a floor it can fit
+ * its base prompt within). This guards against non-integers and absurdly large
+ * values; the compaction reserve is owned adaptively by RC, never the user.
  */
 export function validateModelTuning(input: ModelTuningInput): ModelTuningIssue[] {
   const issues: ModelTuningIssue[] = [];
-  const { contextWindow, maxHistoryShare } = input;
+  const { contextWindow } = input;
 
   if (contextWindow !== undefined) {
     if (!isFiniteInt(contextWindow)) {
       issues.push({ field: 'contextWindow', code: 'contextWindow.notInteger' });
-    } else if (contextWindow < CONTEXT_WINDOW_MIN || contextWindow > CONTEXT_WINDOW_MAX) {
+    } else if (contextWindow > CONTEXT_WINDOW_MAX) {
       issues.push({ field: 'contextWindow', code: 'contextWindow.outOfRange' });
-    }
-  }
-
-  if (maxHistoryShare !== undefined) {
-    if (
-      typeof maxHistoryShare !== 'number' ||
-      !Number.isFinite(maxHistoryShare) ||
-      maxHistoryShare < MAX_HISTORY_SHARE_MIN ||
-      maxHistoryShare > MAX_HISTORY_SHARE_MAX
-    ) {
-      issues.push({ field: 'maxHistoryShare', code: 'maxHistoryShare.outOfRange' });
-    }
-  }
-
-  // 防呆: even individually-valid window/share values can pair into a budget where
-  // OC's self-compaction never recovers. Predict against the window that will
-  // actually be saved (pinned value, else OC's default). Skip when a field is
-  // already flagged above to avoid contradictory errors.
-  if (issues.length === 0) {
-    const effectiveWindow = contextWindow ?? OC_DEFAULT_CONTEXT_WINDOW;
-    if (!compactionCanRecover(effectiveWindow, maxHistoryShare)) {
-      issues.push({
-        field: contextWindow !== undefined ? 'contextWindow' : 'maxHistoryShare',
-        code: 'compaction.unrecoverable',
-      });
     }
   }
 
@@ -1110,15 +1111,21 @@ export function buildSaveConfig(
     imageModel: { primary: visionRef },
   };
 
-  // --- Compaction (global; sizes the whole-session preemptive-compaction trigger) ---
-  // Only the history-share knob is user-facing; reserveTokens is left to OC's own
-  // floor. Existing fields (notably the RC default mode:'safeguard') are preserved.
-  if (input.compactionMaxHistoryShare !== undefined) {
+  // --- Compaction (global) — RC owns the strategy; not user-tunable ---
+  // History share and reserve are both deferred to OC's defaults: any prior
+  // RC-written value is stripped. The turn-1 fit is guaranteed by the
+  // CONTEXT_WINDOW_MIN floor (OC pins the precheck reserve at its own default,
+  // ignoring reserveTokens in the embedded path), so RC writes no reserve keys.
+  // Existing fields (notably RC's mode:'safeguard') are preserved.
+  {
     const existingCompaction =
       (existingDefaults?.compaction as Record<string, unknown> | undefined) ?? {};
     const compaction: Record<string, unknown> = { ...existingCompaction };
-    compaction.maxHistoryShare = input.compactionMaxHistoryShare;
+    delete compaction.maxHistoryShare;
+    delete compaction.reserveTokens;
+    delete compaction.reserveTokensFloor;
     if (compaction.mode === undefined) compaction.mode = 'safeguard';
+
     defaults.compaction = compaction;
   }
 
@@ -1361,13 +1368,6 @@ export function extractConfigFields(
   const heartbeatEnabled = heartbeatEvery !== '0m';
   const heartbeatInterval = heartbeatEnabled ? heartbeatEvery : '30m';
 
-  // --- Compaction (global) ---
-  const compactionDef = defaults?.compaction as Record<string, unknown> | undefined;
-  const compactionMaxHistoryShare =
-    typeof compactionDef?.maxHistoryShare === 'number'
-      ? (compactionDef.maxHistoryShare as number)
-      : undefined;
-
   return {
     provider: textProviderKey,
     baseUrl: displayBaseUrl,
@@ -1396,7 +1396,6 @@ export function extractConfigFields(
     webSearchApiKeyConfigured: typeof webSearchApiKeyRaw === 'string' && webSearchApiKeyRaw.length > 0,
     heartbeatEnabled,
     heartbeatInterval,
-    compactionMaxHistoryShare,
   };
 }
 
