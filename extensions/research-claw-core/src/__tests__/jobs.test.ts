@@ -208,7 +208,7 @@ describe('OpenClaw subagent job sync', () => {
     expect(jobs[0]).toMatchObject({
       id: 'openclaw:child-session-id',
       type: 'openclaw-subagent',
-      title: '批量整理 workspace 论文',
+      title: '文献任务: 批量整理 workspace 论文',
       session_key: 'agent:main:subagent:abc',
       status: 'completed',
       progress: 100,
@@ -271,6 +271,7 @@ describe('OpenClaw subagent job sync', () => {
     expect(jobs).toHaveLength(1);
     expect(jobs[0]).toMatchObject({
       id: 'longtask:tracked-job',
+      title: '批量整理 workspace 论文',
       status: 'completed',
       progress: 100,
     });
@@ -444,7 +445,7 @@ describe('job tools and RPC', () => {
     expect(submitted.job.id).toMatch(/^longtask:/);
     expect(submitted.job.type).toBe('openclaw-subagent');
     expect(submitted.job.status).toBe('queued');
-    expect(submitted.job.title).toBe('批量整理 workspace 论文');
+    expect(submitted.job.title).toBe('文献任务: 批量整理 workspace 里的论文，生成报告');
     expect(service.get(submitted.job.id).input.source).toBe('auto-long-task');
   });
 });

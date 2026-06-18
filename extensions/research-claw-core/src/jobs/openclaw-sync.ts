@@ -3,6 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { JobService, type JobStatus } from './service.js';
+import { formatJobTitleFromMessage } from './title.js';
 
 interface Logger {
   debug?: (message: string) => void;
@@ -100,7 +101,8 @@ export function syncOpenClawSubagentJobs(
       const startedAt = formatDbDate(session.startedAt ?? session.sessionStartedAt);
       const updatedAt = formatDbDate(session.updatedAt ?? session.lastInteractionAt);
       const completedAt = isTerminal(status) ? updatedAt : null;
-      const title = transcript.title || session.label || `OpenClaw 子任务 ${sessionId.slice(0, 8)}`;
+      const title = existingJob?.title
+        ?? formatJobTitleFromMessage(transcript.title || session.label || `子任务 ${sessionId.slice(0, 8)}`, 'OpenClaw 子任务');
       const currentStep = preserveResumeRequest
         ? existingJob?.current_step ?? '已请求 OpenClaw 子会话继续'
         : currentStepFor(status, session.updatedAt, transcript.latestText);
