@@ -727,7 +727,7 @@ function resolveFallbackPrimaryAfterProfileDelete(
     const modelId = models?.[0]?.id?.trim();
     if (url && modelId) return `${id}/${modelId}`;
   }
-  return 'minimax/MiniMax-M2.7';
+  return 'minimax/MiniMax-M3';
 }
 
 function stripInvalidApiProfileProviders(

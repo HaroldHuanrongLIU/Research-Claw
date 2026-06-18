@@ -48,12 +48,12 @@ const RC_CARDS: Record<string, { provider: string; card: RcModelCard }> = {
   minimax: {
     provider: 'minimax',
     card: {
-      id: 'MiniMax-M2.7',
-      name: 'MiniMax-M2.7',
+      id: 'MiniMax-M3',
+      name: 'MiniMax-M3',
       reasoning: true,
-      input: ['text'],
-      contextWindow: 200_000,
-      maxTokens: 8_192,
+      input: ['text', 'image'],
+      contextWindow: 1_000_000,
+      maxTokens: 131_072,
     },
   },
 };
@@ -122,13 +122,13 @@ describe('alignCardWithCatalog — real RC models against OC 2026.6.1', () => {
     expect(r.card.reasoning).toBe(false); // unchanged
   });
 
-  it('minimax/MiniMax-M2.7: not in OC catalog → all values preserved', () => {
+  it('minimax/MiniMax-M3: auth-scoped model absent from catalog → all values preserved', () => {
     const { provider, card } = RC_CARDS.minimax;
     const r = alignCardWithCatalog(provider, card, catalog);
     expect(r.matched).toBe('none');
     expect(r.changed).toBe(false);
-    expect(r.card.contextWindow).toBe(200_000);
-    expect(r.card.maxTokens).toBe(8_192);
+    expect(r.card.contextWindow).toBe(1_000_000);
+    expect(r.card.maxTokens).toBe(131_072);
     expect(r.card).toEqual(card); // identical content
   });
 });
@@ -200,7 +200,7 @@ describe('alignConfigModels — whole-config alignment against OC 2026.6.1', () 
           minimax: {
             api: 'anthropic-messages',
             models: [
-              { id: 'MiniMax-M2.7', name: 'MiniMax-M2.7', api: 'anthropic-messages', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
+              { id: 'MiniMax-M3', name: 'MiniMax-M3', api: 'anthropic-messages', reasoning: true, input: ['text', 'image'], contextWindow: 1_000_000, maxTokens: 131_072 },
             ],
           },
           openai: {
@@ -240,7 +240,7 @@ describe('alignConfigModels — whole-config alignment against OC 2026.6.1', () 
     expect(providers['zai-coding'].models[0].contextWindow).toBe(202_800);
     // Unchanged models keep their values.
     expect(providers.deepseek.models[0].contextWindow).toBe(1_000_000);
-    expect(providers.minimax.models[0].contextWindow).toBe(200_000);
+    expect(providers.minimax.models[0].contextWindow).toBe(1_000_000);
     // api field is never touched.
     expect(providers.openai.models[0].api).toBeUndefined();
     expect(providers.minimax.models[0].api).toBe('anthropic-messages');

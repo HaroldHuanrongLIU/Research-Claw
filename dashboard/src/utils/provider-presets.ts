@@ -5,8 +5,9 @@
  * so that ProviderCapabilities (tool schema mode, thinking signatures, etc.)
  * and the automatic imageModel fallback logic work correctly.
  *
- * Sources (synced against OC v2026.3.12 — 2026-03-16):
- *   - Added CN/Global endpoint variants for: Moonshot, Z.AI, MiniMax, Model Studio
+ * Sources (synced against OC v2026.6.1 — 2026-06-17):
+ *   - Added MiniMax M3 defaults and kept CN/Global endpoint variants for MiniMax
+ *   - Added CN/Global endpoint variants for: Moonshot, Z.AI, Model Studio
  *
  * Original sources:
  *   - openclaw/src/agents/provider-capabilities.ts (provider keys)
@@ -203,8 +204,9 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: 'https://api.minimax.io/anthropic',
     api: 'anthropic-messages',
     models: [
-      { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
-      { id: 'MiniMax-M2.7-highspeed', name: 'MiniMax M2.7 Highspeed', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
+      { id: 'MiniMax-M3', name: 'MiniMax M3', reasoning: true, input: ['text', 'image'], contextWindow: 1_000_000, maxTokens: 131_072 },
+      { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', reasoning: true, input: ['text'], contextWindow: 204_800, maxTokens: 131_072 },
+      { id: 'MiniMax-M2.7-highspeed', name: 'MiniMax M2.7 Highspeed', reasoning: true, input: ['text'], contextWindow: 204_800, maxTokens: 131_072 },
       { id: 'MiniMax-VL-01', name: 'MiniMax VL-01 (Vision)', input: ['text', 'image'], contextWindow: 200_000, maxTokens: 8_192 },
       { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
       { id: 'MiniMax-M2.5-highspeed', name: 'MiniMax M2.5 Highspeed', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
@@ -217,8 +219,9 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: 'https://api.minimaxi.com/anthropic',
     api: 'anthropic-messages',
     models: [
-      { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
-      { id: 'MiniMax-M2.7-highspeed', name: 'MiniMax M2.7 Highspeed', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
+      { id: 'MiniMax-M3', name: 'MiniMax M3', reasoning: true, input: ['text', 'image'], contextWindow: 1_000_000, maxTokens: 131_072 },
+      { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', reasoning: true, input: ['text'], contextWindow: 204_800, maxTokens: 131_072 },
+      { id: 'MiniMax-M2.7-highspeed', name: 'MiniMax M2.7 Highspeed', reasoning: true, input: ['text'], contextWindow: 204_800, maxTokens: 131_072 },
       { id: 'MiniMax-VL-01', name: 'MiniMax VL-01 (Vision)', input: ['text', 'image'], contextWindow: 200_000, maxTokens: 8_192 },
       { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },
       { id: 'MiniMax-M2.5-highspeed', name: 'MiniMax M2.5 Highspeed', reasoning: true, input: ['text'], contextWindow: 200_000, maxTokens: 8_192 },

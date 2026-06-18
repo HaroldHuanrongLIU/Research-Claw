@@ -35,11 +35,19 @@ describe('resolveModelDef catalog priority', () => {
 
   it('with cache, keeps the static preset for a card OC cannot match (no case-folded basename pull)', () => {
     // OC's catalog only has lowercase `minimax-m2.7` (novita=1M); the exact id
-    // `MiniMax-M2.7` is a case-sensitive miss, so the static 200K preset must win
+    // `MiniMax-M2.7` is a case-sensitive miss, so the static MiniMax preset must win
     // rather than being inflated to novita's 1M.
     setModelCatalogCache(ocModelsListAllPayload.models);
     const card = resolveModelDef('minimax', 'MiniMax-M2.7');
-    expect(card.contextWindow).toBe(200_000);
+    expect(card.contextWindow).toBe(204_800);
+  });
+
+  it('with cache, keeps the M3 static preset when MiniMax auth models are absent from catalog', () => {
+    setModelCatalogCache(ocModelsListAllPayload.models);
+    const card = resolveModelDef('minimax', 'MiniMax-M3');
+    expect(card.reasoning).toBe(true);
+    expect(card.input).toEqual(['text', 'image']);
+    expect(card.contextWindow).toBe(1_000_000);
   });
 
   it('with cache, a model neither preset nor OC knows still gets the OC-default fallback', () => {

@@ -845,15 +845,15 @@ describe('buildSaveConfig', () => {
     expect(models[0].reasoning).toBe(true);
   });
 
-  // --- PR #18: MiniMax M2.7 model support ---
+  // --- MiniMax M3 / M2.7 model support ---
 
-  it('builds config with MiniMax M2.7 model (international)', () => {
+  it('builds config with MiniMax M3 model (international)', () => {
     const config = buildSaveConfig(null, {
       provider: 'minimax',
       baseUrl: 'https://api.minimax.io/anthropic',
       api: 'anthropic-messages',
       apiKey: 'sk-test',
-      textModel: 'MiniMax-M2.7',
+      textModel: 'MiniMax-M3',
     });
 
     const providers = (config.models as Record<string, unknown>).providers as Record<string, Record<string, unknown>>;
@@ -861,10 +861,12 @@ describe('buildSaveConfig', () => {
     expect(providers.minimax.baseUrl).toBe('https://api.minimax.io/anthropic');
     expect(providers.minimax.api).toBe('anthropic-messages');
 
-    const models = providers.minimax.models as Array<{ id: string; input: string[]; reasoning: boolean }>;
-    expect(models[0].id).toBe('MiniMax-M2.7');
-    expect(models[0].input).toEqual(['text']);
+    const models = providers.minimax.models as Array<{ id: string; input: string[]; reasoning: boolean; contextWindow: number; maxTokens: number }>;
+    expect(models[0].id).toBe('MiniMax-M3');
+    expect(models[0].input).toEqual(['text', 'image']);
     expect(models[0].reasoning).toBe(true);
+    expect(models[0].contextWindow).toBe(1_000_000);
+    expect(models[0].maxTokens).toBe(131_072);
   });
 
   it('builds config with MiniMax M2.7-highspeed model (CN)', () => {
@@ -883,8 +885,8 @@ describe('buildSaveConfig', () => {
     const models = providers['minimax-cn'].models as Array<{ id: string; reasoning: boolean; contextWindow: number; maxTokens: number }>;
     expect(models[0].id).toBe('MiniMax-M2.7-highspeed');
     expect(models[0].reasoning).toBe(true);
-    expect(models[0].contextWindow).toBe(200_000);
-    expect(models[0].maxTokens).toBe(8_192);
+    expect(models[0].contextWindow).toBe(204_800);
+    expect(models[0].maxTokens).toBe(131_072);
   });
 
   // --- Preserves existing env when proxyUrl undefined ---
@@ -1451,6 +1453,22 @@ describe('buildDeleteApiProfilesConfig', () => {
     expect(providers.custom).toBeUndefined();
     const defaults = (result.agents as Record<string, unknown>).defaults as Record<string, unknown>;
     expect((defaults.model as { primary?: string }).primary).toBe('minimax/MiniMax-M2.7');
+  });
+
+  it('falls back to MiniMax M3 when no configured provider remains', () => {
+    const config = {
+      agents: { defaults: { model: { primary: 'custom/m0' } } },
+      models: {
+        providers: {
+          custom: { baseUrl: '', models: [{ id: 'm0' }] },
+        },
+      },
+    };
+    const result = buildDeleteApiProfilesConfig(config, ['custom']);
+    const providers = (result.models as Record<string, unknown>).providers as Record<string, unknown>;
+    expect(providers.custom).toBeUndefined();
+    const defaults = (result.agents as Record<string, unknown>).defaults as Record<string, unknown>;
+    expect((defaults.model as { primary?: string }).primary).toBe('minimax/MiniMax-M3');
   });
 
   it('removes a configured preset entry and keeps other providers', () => {

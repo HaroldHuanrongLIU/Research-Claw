@@ -1,6 +1,6 @@
 /**
  * Tests for provider-presets.ts
- * Covers MiniMax M2.7 model additions (PR #18) and general preset integrity.
+ * Covers MiniMax M3/M2.7 model support and general preset integrity.
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -11,7 +11,7 @@ import {
   protocolProbeOrder,
 } from './provider-presets';
 
-describe('MiniMax provider presets (PR #18)', () => {
+describe('MiniMax provider presets', () => {
   const minimax = PROVIDER_PRESETS.find((p) => p.id === 'minimax')!;
   const minimaxCn = PROVIDER_PRESETS.find((p) => p.id === 'minimax-cn')!;
 
@@ -20,31 +20,46 @@ describe('MiniMax provider presets (PR #18)', () => {
     expect(minimaxCn).toBeDefined();
   });
 
-  it('international preset contains M2.7 and M2.7-highspeed models', () => {
+  it('international preset contains M3, M2.7, and M2.7-highspeed models', () => {
     const ids = minimax.models.map((m) => m.id);
+    expect(ids).toContain('MiniMax-M3');
     expect(ids).toContain('MiniMax-M2.7');
     expect(ids).toContain('MiniMax-M2.7-highspeed');
   });
 
-  it('CN preset contains M2.7 and M2.7-highspeed models', () => {
+  it('CN preset contains M3, M2.7, and M2.7-highspeed models', () => {
     const ids = minimaxCn.models.map((m) => m.id);
+    expect(ids).toContain('MiniMax-M3');
     expect(ids).toContain('MiniMax-M2.7');
     expect(ids).toContain('MiniMax-M2.7-highspeed');
   });
 
-  it('M2.7 models are positioned before M2.5 models (default selection)', () => {
+  it('M3 is positioned before M2.7 and M2.5 models (default selection)', () => {
+    const m3Idx = minimax.models.findIndex((m) => m.id === 'MiniMax-M3');
     const m27Idx = minimax.models.findIndex((m) => m.id === 'MiniMax-M2.7');
     const m25Idx = minimax.models.findIndex((m) => m.id === 'MiniMax-M2.5');
+    expect(m3Idx).toBeLessThan(m27Idx);
     expect(m27Idx).toBeLessThan(m25Idx);
 
+    const m3CnIdx = minimaxCn.models.findIndex((m) => m.id === 'MiniMax-M3');
     const m27CnIdx = minimaxCn.models.findIndex((m) => m.id === 'MiniMax-M2.7');
     const m25CnIdx = minimaxCn.models.findIndex((m) => m.id === 'MiniMax-M2.5');
+    expect(m3CnIdx).toBeLessThan(m27CnIdx);
     expect(m27CnIdx).toBeLessThan(m25CnIdx);
   });
 
-  it('M2.7 is the first model (becomes default on provider selection)', () => {
-    expect(minimax.models[0].id).toBe('MiniMax-M2.7');
-    expect(minimaxCn.models[0].id).toBe('MiniMax-M2.7');
+  it('M3 is the first model (becomes default on provider selection)', () => {
+    expect(minimax.models[0].id).toBe('MiniMax-M3');
+    expect(minimaxCn.models[0].id).toBe('MiniMax-M3');
+  });
+
+  it('M3 has OpenClaw 6.1 properties', () => {
+    const m3 = minimax.models.find((m) => m.id === 'MiniMax-M3')!;
+
+    expect(m3.reasoning).toBe(true);
+    expect(m3.input).toEqual(['text', 'image']);
+    expect(m3.contextWindow).toBe(1_000_000);
+    expect(m3.maxTokens).toBe(131_072);
   });
 
   it('M2.7 models have correct properties', () => {
@@ -53,21 +68,22 @@ describe('MiniMax provider presets (PR #18)', () => {
 
     expect(m27.reasoning).toBe(true);
     expect(m27.input).toEqual(['text']);
-    expect(m27.contextWindow).toBe(200_000);
-    expect(m27.maxTokens).toBe(8_192);
+    expect(m27.contextWindow).toBe(204_800);
+    expect(m27.maxTokens).toBe(131_072);
 
     expect(m27hs.reasoning).toBe(true);
     expect(m27hs.input).toEqual(['text']);
-    expect(m27hs.contextWindow).toBe(200_000);
-    expect(m27hs.maxTokens).toBe(8_192);
+    expect(m27hs.contextWindow).toBe(204_800);
+    expect(m27hs.maxTokens).toBe(131_072);
   });
 
-  it('CN preset M2.7 models have identical properties to international', () => {
-    const intl = minimax.models.filter((m) => m.id.startsWith('MiniMax-M2.7'));
-    const cn = minimaxCn.models.filter((m) => m.id.startsWith('MiniMax-M2.7'));
+  it('CN preset M3/M2.7 models have identical properties to international', () => {
+    const trackedIds = new Set(['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed']);
+    const intl = minimax.models.filter((m) => trackedIds.has(m.id));
+    const cn = minimaxCn.models.filter((m) => trackedIds.has(m.id));
 
-    expect(intl.length).toBe(2);
-    expect(cn.length).toBe(2);
+    expect(intl.length).toBe(3);
+    expect(cn.length).toBe(3);
 
     for (let i = 0; i < intl.length; i++) {
       expect(cn[i].id).toBe(intl[i].id);
@@ -88,7 +104,7 @@ describe('MiniMax provider presets (PR #18)', () => {
     expect(minimaxCn.api).toBe('anthropic-messages');
   });
 
-  it('still contains VL-01 vision model alongside M2.7', () => {
+  it('still contains VL-01 vision model alongside M3/M2.7', () => {
     const ids = minimax.models.map((m) => m.id);
     expect(ids).toContain('MiniMax-VL-01');
     const vl01 = minimax.models.find((m) => m.id === 'MiniMax-VL-01')!;
