@@ -25,7 +25,7 @@ export default function StatusBar() {
   // (Filtering inside the selector returns a new array every call and sends
   //  zustand into an infinite re-render loop.)
   const jobs = useJobsStore((s) => s.jobs);
-  const activeJobs = jobs.filter((j) => j.status === 'queued' || j.status === 'running' || j.status === 'stalled');
+  const activeJobs = jobs.filter((j) => j.status === 'queued' || j.status === 'running');
   const [heartbeatAge, setHeartbeatAge] = useState(0);
 
   // Heartbeat timer — counts seconds since last tick

@@ -103,14 +103,15 @@ export class JobService {
     heartbeat_at?: string | null;
     started_at?: string | null;
     completed_at?: string | null;
+    updated_at?: string | null;
   }): Job {
     const progress = clampProgress(input.progress);
     this.db.prepare(
       `INSERT INTO rc_jobs (
          id, type, title, session_key, status, progress, current_step,
-         input_json, result_json, checkpoint_json, error, heartbeat_at, started_at, completed_at
+         input_json, result_json, checkpoint_json, error, heartbeat_at, started_at, completed_at, updated_at
        )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
        ON CONFLICT(id) DO UPDATE SET
          type=excluded.type,
          title=excluded.title,
@@ -141,7 +142,7 @@ export class JobService {
          heartbeat_at=excluded.heartbeat_at,
          started_at=COALESCE(rc_jobs.started_at, excluded.started_at),
          completed_at=COALESCE(excluded.completed_at, rc_jobs.completed_at),
-         updated_at=datetime('now')`,
+         updated_at=excluded.updated_at`,
     ).run(
       input.id,
       input.type,
@@ -157,6 +158,7 @@ export class JobService {
       input.heartbeat_at ?? null,
       input.started_at ?? null,
       input.completed_at ?? null,
+      input.updated_at ?? null,
     );
     return this.get(input.id);
   }

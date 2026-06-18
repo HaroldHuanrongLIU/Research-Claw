@@ -124,9 +124,11 @@ describe('JobService', () => {
       current_step: 'OpenClaw 子会话运行中',
       input: { session_id: 'session-1' },
       heartbeat_at: '2026-06-14 12:00:00',
+      updated_at: '2026-06-14 12:00:00',
     });
     expect(first.title).toBe('Paper inventory');
     expect(first.status).toBe('running');
+    expect(first.updated_at).toBe('2026-06-14 12:00:00');
 
     const completed = service.upsertExternal({
       id: 'openclaw:session-1',
@@ -139,10 +141,12 @@ describe('JobService', () => {
       result: { summary: 'done' },
       heartbeat_at: '2026-06-14 12:03:00',
       completed_at: '2026-06-14 12:03:00',
+      updated_at: '2026-06-14 12:03:00',
     });
     expect(completed.id).toBe(first.id);
     expect(completed.status).toBe('completed');
     expect(completed.result).toEqual({ summary: 'done' });
+    expect(completed.updated_at).toBe('2026-06-14 12:03:00');
     expect(service.list({ session_key: 'agent:main:subagent:abc' })).toHaveLength(1);
   });
 });
@@ -209,7 +213,12 @@ describe('OpenClaw subagent job sync', () => {
       status: 'completed',
       progress: 100,
     });
+    expect(jobs[0].completed_at).toBe('2026-06-14 12:05:00');
+    expect(jobs[0].updated_at).toBe('2026-06-14 12:05:00');
     expect(jobs[0].checkpoint.latest_text).toContain('整理报告');
+
+    syncOpenClawSubagentJobs(service, { sessionsJsonPath: sessionsPath });
+    expect(service.get('openclaw:child-session-id').updated_at).toBe('2026-06-14 12:05:00');
   });
 
   it('binds OpenClaw subagent sessions back to pre-created long task jobs', () => {

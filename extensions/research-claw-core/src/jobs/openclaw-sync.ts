@@ -140,6 +140,7 @@ export function syncOpenClawSubagentJobs(
         heartbeat_at: status === 'running' ? formatDbDate(now) : updatedAt,
         started_at: startedAt,
         completed_at: completedAt,
+        updated_at: updatedAt,
       });
       synced++;
     } catch (err) {

@@ -14,7 +14,8 @@ import { notifyNative, setDockBadge, isDesktop } from '../utils/desktop';
  * In a plain browser the native calls are no-ops; the in-app panel still works.
  */
 
-const ACTIVE: ReadonlySet<JobStatus> = new Set<JobStatus>(['queued', 'running', 'stalled']);
+const ACTIVE: ReadonlySet<JobStatus> = new Set<JobStatus>(['queued', 'running']);
+const TRACKED_UNFINISHED: ReadonlySet<JobStatus> = new Set<JobStatus>(['queued', 'running', 'stalled']);
 // Terminal states worth a notification. 'cancelled' is user-initiated, so skip.
 const NOTIFY_DONE: ReadonlySet<JobStatus> = new Set<JobStatus>(['completed', 'partial', 'failed']);
 
@@ -58,7 +59,7 @@ export default function JobsActivityListener() {
     } else {
       for (const job of jobs) {
         const before = prev.get(job.id);
-        if (before && ACTIVE.has(before) && NOTIFY_DONE.has(job.status)) {
+        if (before && TRACKED_UNFINISHED.has(before) && NOTIFY_DONE.has(job.status)) {
           notifyNative(t(`jobs.notify.${job.status}`), job.title);
         }
         prev.set(job.id, job.status);
