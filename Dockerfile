@@ -82,6 +82,21 @@ RUN PIP_INDEX_URL="$(echo ${NPM_REGISTRY} | grep -q npmmirror && echo https://py
 
 ENV PATH="/opt/miniforge3/bin:$PATH"
 
+# ── uv / uvx (sci-papers-downloder Sci-Hub fallback) ─────────────────
+# sci-papers-downloder's downloader runs `--scihub-fallback auto` by default and
+# resolves the Sci-Hub command in order: --scihub-cmd → PATH `scihub-cli` →
+# `uvx --from git+https://github.com/Oxidane-bot/scihub-cli.git scihub-cli`.
+# Linux/Docker ships neither scihub-cli nor uv, so the fallback silently no-ops.
+# Install uv (provides uvx) so the 3rd resolution path works on demand; scihub-cli
+# itself is fetched lazily at first use (kept out of image layers). Non-fatal:
+# Sci-Hub is an optional last resort — never break the build over it.
+RUN set +e; \
+    curl -fsSL https://astral.sh/uv/install.sh | sh; \
+    ln -sf /root/.local/bin/uv  /usr/local/bin/uv; \
+    ln -sf /root/.local/bin/uvx /usr/local/bin/uvx; \
+    echo "[build] uv for sci-hub fallback: $(command -v uvx || echo 'unavailable (optional)')"; \
+    exit 0
+
 # ── 依赖层（package 文件不变则缓存命中）──────────────────────────────
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY patches/ ./patches/

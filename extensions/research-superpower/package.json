@@ -1,0 +1,11 @@
+{
+  "name": "@research-claw/research-superpower",
+  "version": "0.1.0",
+  "description": "Scopus + OpenAlex research pipeline exposed as native OpenClaw tools",
+  "type": "module",
+  "main": "index.ts",
+  "private": true,
+  "dependencies": {
+    "@sinclair/typebox": "0.34.48"
+  }
+}

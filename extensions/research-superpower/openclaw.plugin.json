@@ -1,0 +1,29 @@
+{
+  "id": "research-superpower",
+  "name": "Research Superpower",
+  "version": "0.1.0",
+  "description": "Scopus relevance search + OpenAlex abstracts/citations/OA full text. Exposes the rp.py pipeline as native tools.",
+  "main": "index.ts",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "rp_search",
+      "rp_abstracts",
+      "rp_cite",
+      "rp_fulltext"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "description": "Enable or disable the research-superpower tools (rp_search, rp_abstracts, rp_cite, rp_fulltext)",
+        "default": true
+      }
+    }
+  }
+}

@@ -71,6 +71,9 @@ dashboard/test-image-send.mjs
 # Lock files (using pnpm, not npm)
 extensions/*/package-lock.json
 
+# Extension script caches (runtime API-response caches, regenerated on demand)
+extensions/*/scripts/.cache/
+
 # Workspace runtime data
 # All prompt files live in workspace/.ResearchClaw/ (loaded via agent:bootstrap hook).
 # Root-level copies (AGENTS.md, HEARTBEAT.md) are synced by run.sh for OC compatibility

@@ -184,6 +184,12 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(@types/debug@4.1.12)(@types/node@22.19.15)(happy-dom@16.8.1)(jiti@2.7.0)(sass@1.98.0)(yaml@2.9.0)
 
+  extensions/research-superpower:
+    dependencies:
+      '@sinclair/typebox':
+        specifier: 0.34.48
+        version: 0.34.48
+
   extensions/wentor-connect:
     devDependencies:
       '@types/node':

@@ -1,6 +1,8 @@
 {
   "env": {
-    "vars": {}
+    "vars": {
+      "UNPAYWALL_EMAIL": "research@wentor.ai"
+    }
   },
   "discovery": {
     "mdns": {
@@ -84,16 +86,19 @@
   "plugins": {
     "enabled": true,
     "allow": [
+      "browser",
       "research-claw-core",
       "research-plugins",
       "openclaw-weixin",
-      "dual-model-supervisor"
+      "dual-model-supervisor",
+      "research-superpower"
     ],
     "load": {
       "paths": [
         "./extensions/research-claw-core",
         "./extensions/openclaw-weixin",
-        "./extensions/dual-model-supervisor"
+        "./extensions/dual-model-supervisor",
+        "./extensions/research-superpower"
       ]
     },
     "entries": {
@@ -140,6 +145,9 @@
             "browser"
           ]
         }
+      },
+      "research-superpower": {
+        "enabled": true
       }
     }
   },
