@@ -1021,31 +1021,54 @@ else
 fi
 
 # --- [8/8] Register research-plugins (skills + agent tools) ---
-# Installed via OpenClaw's plugin system (npm pack → ~/.openclaw/extensions/).
-# NOT loaded from node_modules — avoids pnpm hardlink rejection.
-# Use a minimal temp config for plugin install to avoid chicken-and-egg:
-# the real config may reference research-plugins in plugins.allow before
-# the plugin is actually installed, causing OC validation to reject the config.
-# This matches the workaround used in Dockerfile.
-run_openclaw_plugin_install() {
-  local TMP_CFG; TMP_CFG="$(mktemp)"
-  echo '{}' > "$TMP_CFG"
-  local -a ENV_ARGS=("OPENCLAW_CONFIG_PATH=$TMP_CFG")
-  [ -n "${NPM_REGISTRY:-}" ] && ENV_ARGS+=("npm_config_registry=$NPM_REGISTRY")
-  local RC=0
-  # Timeout (120s) prevents indefinite hang on slow npm networks (e.g. China)
-  if command -v timeout &>/dev/null; then
-    env "${ENV_ARGS[@]}" timeout 120 "$GW_NODE" ./node_modules/openclaw/dist/entry.js plugins install "$@" || RC=$?
-  else
-    env "${ENV_ARGS[@]}" "$GW_NODE" ./node_modules/openclaw/dist/entry.js plugins install "$@" || RC=$?
-  fi
-  rm -f "$TMP_CFG"
-  return $RC
-}
+# Install deterministically into ~/.openclaw/extensions/research-plugins.
+# We deliberately do NOT use `openclaw plugins install`: OC 2026.6.1 installs the
+# package into <install>/config/npm/projects/<hash>/node_modules/, which the
+# gateway loads for the agent tools, but research-claw-core's SkillSearch only
+# scans ~/.openclaw/extensions/research-plugins for catalog.json — so skill
+# search would silently disable. Installing here (the same layout the Docker
+# image bakes) makes the gateway auto-discover the 34 agent tools AND lets
+# SkillSearch find catalog.json. NOT loaded from node_modules (avoids pnpm
+# hardlink rejection).
 PLUGIN_DIR="$HOME/.openclaw/extensions/research-plugins"
 rp_summary() {
   local SKILLS; SKILLS=$(find "$PLUGIN_DIR/skills" -name "SKILL.md" 2>/dev/null | wc -l | tr -d ' ')
   [ "$SKILLS" -gt 0 ] 2>/dev/null && echo "${SKILLS} skills" || true
+}
+# Deterministic install: npm pack → extract into $PLUGIN_DIR → install prod deps.
+# Returns 0 on success, non-zero on failure; appends diagnostics to log file ($1).
+rp_install_to_extensions() {
+  local LOG="$1"
+  local TMPD; TMPD="$(mktemp -d)"
+  local RC_=1 OK_PACK=1
+  # Timeout (120s) prevents indefinite hang on slow npm networks (e.g. China)
+  if command -v timeout &>/dev/null; then
+    timeout 120 npm pack @wentorai/research-plugins --pack-destination "$TMPD" ${NPM_REGISTRY:+--registry "$NPM_REGISTRY"} >>"$LOG" 2>&1 && OK_PACK=0
+  else
+    npm pack @wentorai/research-plugins --pack-destination "$TMPD" ${NPM_REGISTRY:+--registry "$NPM_REGISTRY"} >>"$LOG" 2>&1 && OK_PACK=0
+  fi
+  if [ "$OK_PACK" -eq 0 ]; then
+    local RP_TGZ; RP_TGZ=$(ls "$TMPD"/wentorai-research-plugins-*.tgz 2>/dev/null | head -1)
+    if [ -n "$RP_TGZ" ]; then
+      rm -rf "$PLUGIN_DIR"; mkdir -p "$PLUGIN_DIR"
+      # Raw tarball ships no node_modules; the plugin (main: dist/index.js) imports
+      # @sinclair/typebox at load, so install prod deps or the plugin fails to load
+      # (losing all 34 agent tools). --ignore-scripts: typebox is pure JS.
+      if tar xzf "$RP_TGZ" --strip-components=1 -C "$PLUGIN_DIR" 2>>"$LOG" \
+        && ( cd "$PLUGIN_DIR" && npm install --omit=dev --ignore-scripts --no-audit --no-fund ${NPM_REGISTRY:+--registry "$NPM_REGISTRY"} >>"$LOG" 2>&1 ); then
+        RC_=0
+      fi
+    fi
+  fi
+  rm -rf "$TMPD"
+  return $RC_
+}
+# Remove any stale OC-managed install (from older installers that used
+# `openclaw plugins install`) so the plugin does not load twice — tools and
+# skills now come solely from $PLUGIN_DIR.
+rp_cleanup_oc_managed() {
+  find "$INSTALL_DIR/config/npm/projects" -maxdepth 1 -type d -name '*research-plugins*' \
+    -exec rm -rf {} + 2>/dev/null || true
 }
 
 if ! $UPDATE_FAILED; then
@@ -1060,120 +1083,56 @@ rp_network_hint() {
 }
 
 info "Installing research-plugins..."
+RP_LOG="$(mktemp)"
 if [ -d "$PLUGIN_DIR" ]; then
-  # Update existing: backup → delete → install → restore on failure
+  # Update existing: backup → install → restore on failure
   CURRENT_VER=$(node -e "console.log(require('$PLUGIN_DIR/package.json').version)" 2>/dev/null || echo "unknown")
   cp -r "$PLUGIN_DIR" "${PLUGIN_DIR}.bak" 2>/dev/null || true
-  rm -rf "$PLUGIN_DIR"
-  RP_LOG="$(mktemp)"
-  RP_EXIT=0
-  run_openclaw_plugin_install @wentorai/research-plugins >"$RP_LOG" 2>&1 || RP_EXIT=$?
-  if [ "$RP_EXIT" -eq 0 ]; then
+  if rp_install_to_extensions "$RP_LOG"; then
     rm -rf "${PLUGIN_DIR}.bak"
+    rp_cleanup_oc_managed
     NEW_VER=$(node -e "console.log(require('$PLUGIN_DIR/package.json').version)" 2>/dev/null || echo "unknown")
     if [ "$CURRENT_VER" = "$NEW_VER" ]; then
       RP_S=$(rp_summary); ok "Research-plugins v${NEW_VER}${RP_S:+ ($RP_S)}"
     else
       ok "Research-plugins updated: v${CURRENT_VER} → v${NEW_VER}"
     fi
-  else
-    # OC plugin installer failed — try fallback before restoring backup
+  elif [ -d "${PLUGIN_DIR}.bak" ]; then
     rm -rf "$PLUGIN_DIR"
-    warn "OC plugin installer failed. Trying fallback method..."
-    RP_FALLBACK_DIR="$(mktemp -d)"
-    RP_FALLBACK_OK=false
-    if npm pack @wentorai/research-plugins --pack-destination "$RP_FALLBACK_DIR" >>"$RP_LOG" 2>&1; then
-      RP_TGZ=$(ls "$RP_FALLBACK_DIR"/wentorai-research-plugins-*.tgz 2>/dev/null | head -1)
-      if [ -n "$RP_TGZ" ]; then
-        mkdir -p "$PLUGIN_DIR"
-        # Raw tarball has no node_modules; the OC plugin (main: dist/index.js)
-        # imports @sinclair/typebox at load, so install prod deps or the plugin
-        # fails to load. Only flip the success flag once deps are in place.
-        if tar xzf "$RP_TGZ" --strip-components=1 -C "$PLUGIN_DIR" 2>>"$RP_LOG" \
-          && ( cd "$PLUGIN_DIR" && npm install --omit=dev --ignore-scripts --no-audit --no-fund ${NPM_REGISTRY:+--registry "$NPM_REGISTRY"} >>"$RP_LOG" 2>&1 ); then
-          RP_FALLBACK_OK=true
-        fi
-      fi
-    fi
-    rm -rf "$RP_FALLBACK_DIR"
-
-    if $RP_FALLBACK_OK; then
-      rm -rf "${PLUGIN_DIR}.bak"
-      NEW_VER=$(node -e "console.log(require('$PLUGIN_DIR/package.json').version)" 2>/dev/null || echo "unknown")
-      ok "Research-plugins updated: v${CURRENT_VER} → v${NEW_VER} (fallback)"
-    elif [ -d "${PLUGIN_DIR}.bak" ]; then
-      rm -rf "$PLUGIN_DIR"
-      mv "${PLUGIN_DIR}.bak" "$PLUGIN_DIR"
-      warn "research-plugins update failed. Kept existing v${CURRENT_VER}."
-      if [ "$RP_EXIT" -eq 124 ]; then
-        warn "Download timed out (>120s)."
-      else
-        warn "Error details (last 5 lines):"
-        tail -5 "$RP_LOG" 2>/dev/null | while IFS= read -r line; do printf "    %s\n" "$line"; done
-      fi
-      rp_network_hint
-    else
-      warn "research-plugins install failed. You can retry later:"
-      printf "    cd $INSTALL_DIR && npx openclaw plugins install @wentorai/research-plugins\n"
-      rp_network_hint
-    fi
+    mv "${PLUGIN_DIR}.bak" "$PLUGIN_DIR"
+    warn "research-plugins update failed. Kept existing v${CURRENT_VER}."
+    warn "Error details (last 5 lines):"
+    tail -5 "$RP_LOG" 2>/dev/null | while IFS= read -r line; do printf "    %s\n" "$line"; done
+    rp_network_hint
+  else
+    warn "research-plugins install failed. You can retry later:"
+    printf "    cd $INSTALL_DIR && curl -fsSL https://wentor.ai/install.sh | bash\n"
+    rp_network_hint
   fi
-  rm -f "$RP_LOG"
 else
   # Fresh install — clean any residual partial installs first
   rm -rf "$PLUGIN_DIR" 2>/dev/null || true
-  RP_LOG="$(mktemp)"
-  RP_EXIT=0
-  run_openclaw_plugin_install @wentorai/research-plugins >"$RP_LOG" 2>&1 || RP_EXIT=$?
-  if [ "$RP_EXIT" -eq 0 ]; then
+  if rp_install_to_extensions "$RP_LOG"; then
+    rp_cleanup_oc_managed
     NEW_VER=$(node -e "console.log(require('$PLUGIN_DIR/package.json').version)" 2>/dev/null || echo "unknown")
     RP_S=$(rp_summary); ok "Research-plugins v${NEW_VER}${RP_S:+ ($RP_S)}"
   else
-    # Fallback: OC plugin installer may fail due to archive security checks.
-    # Try manual npm pack + tar extract as a workaround.
-    warn "OC plugin installer failed. Trying fallback method..."
-    rm -rf "$PLUGIN_DIR" 2>/dev/null || true
-    RP_FALLBACK_DIR="$(mktemp -d)"
-    if npm pack @wentorai/research-plugins --pack-destination "$RP_FALLBACK_DIR" >"$RP_LOG" 2>&1; then
-      RP_TGZ=$(ls "$RP_FALLBACK_DIR"/wentorai-research-plugins-*.tgz 2>/dev/null | head -1)
-      if [ -n "$RP_TGZ" ]; then
-        mkdir -p "$PLUGIN_DIR"
-        # Raw tarball has no node_modules; the OC plugin (main: dist/index.js)
-        # imports @sinclair/typebox at load, so install prod deps or the plugin
-        # fails to load. Only clear the error flag once deps are in place.
-        if tar xzf "$RP_TGZ" --strip-components=1 -C "$PLUGIN_DIR" 2>>"$RP_LOG" \
-          && ( cd "$PLUGIN_DIR" && npm install --omit=dev --ignore-scripts --no-audit --no-fund ${NPM_REGISTRY:+--registry "$NPM_REGISTRY"} >>"$RP_LOG" 2>&1 ); then
-          RP_EXIT=0
-        fi
-      fi
-    fi
-    rm -rf "$RP_FALLBACK_DIR"
-
-    if [ "$RP_EXIT" -eq 0 ]; then
-      NEW_VER=$(node -e "console.log(require('$PLUGIN_DIR/package.json').version)" 2>/dev/null || echo "unknown")
-      RP_S=$(rp_summary); ok "Research-plugins v${NEW_VER}${RP_S:+ ($RP_S)} (fallback)"
-    else
-      if [ "$RP_EXIT" -eq 124 ]; then
-        warn "research-plugins download timed out (>120s)."
-      else
-        warn "research-plugins install failed."
-        warn "Error details (last 5 lines):"
-        tail -5 "$RP_LOG" 2>/dev/null | while IFS= read -r line; do printf "    %s\n" "$line"; done
-      fi
-      warn "You can retry later:"
-      printf "    cd $INSTALL_DIR && npx openclaw plugins install @wentorai/research-plugins\n"
-      rp_network_hint
-    fi
+    warn "research-plugins install failed."
+    warn "Error details (last 5 lines):"
+    tail -5 "$RP_LOG" 2>/dev/null | while IFS= read -r line; do printf "    %s\n" "$line"; done
+    warn "You can retry later:"
+    printf "    cd $INSTALL_DIR && curl -fsSL https://wentor.ai/install.sh | bash\n"
+    rp_network_hint
   fi
-  rm -f "$RP_LOG"
 fi
+rm -f "$RP_LOG"
 
 # Restore default SIGINT handling
 trap - INT
 if $_RP_INTERRUPTED; then
   printf "\n"
   info "Interrupted. Research-plugins can be installed later:"
-  printf "    cd $INSTALL_DIR && npx openclaw plugins install @wentorai/research-plugins\n"
+  printf "    cd $INSTALL_DIR && curl -fsSL https://wentor.ai/install.sh | bash\n"
   info "To start the gateway:"
   printf "    cd $INSTALL_DIR && bash scripts/run.sh\n"
   exit 130
