@@ -666,7 +666,7 @@
     "visionInheritsText": "视觉沿用文本端点。如需独立端点,请选择或新建一个不同的配置。",
     "tuning": {
       "contextWindow": "上下文窗口 (tokens)",
-      "contextWindowHint": "仅自定义/本地端点可填。留空则交由 OpenClaw 目录或预设自动确定。科研龙虾要求上下文窗口不低于 {{min}} tokens,低于此值的模型不受支持,将自动按 {{min}} 运行。压缩策略由科研龙虾自动管理。",
+      "contextWindowHint": "仅自定义/本地端点需填写,留空将自动确定。最低 {{min}} tokens,更低的模型会自动按 {{min}} 运行;压缩由科研龙虾托管。",
       "autoPlaceholder": "自动",
       "contextWindowClamped": "科研龙虾不支持低于 {{min}} tokens 的上下文窗口,已自动按 {{min}} 运行。",
       "error": {
@@ -875,7 +875,7 @@
     "tokenFixSystemdCmd": "systemctl --user restart research-claw"
   },
   "modelCatalog": {
-    "aligned": "已按 OpenClaw 权威目录校正 {{count}} 个模型的上下文窗口"
+    "aligned": "已按权威模型目录校正 {{count}} 个模型的上下文窗口"
   },
   "status": {
     "connected": "已连接",

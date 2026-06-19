@@ -666,7 +666,7 @@
     "visionInheritsText": "Vision uses the text endpoint. To use a separate endpoint, pick or create a different configuration.",
     "tuning": {
       "contextWindow": "Context Window (tokens)",
-      "contextWindowHint": "Custom/local endpoints only. Leave empty to let OpenClaw's catalog or the preset decide. Research-Claw requires a context window of at least {{min}} tokens — models below this are not supported and will be run at {{min}}. Research-Claw manages the compaction strategy for you.",
+      "contextWindowHint": "Custom/local endpoints only; leave empty to auto-detect. Minimum {{min}} tokens — lower models run at {{min}}, with compaction handled for you.",
       "autoPlaceholder": "Auto",
       "contextWindowClamped": "Research-Claw does not support context windows below {{min}} tokens — automatically running at {{min}}.",
       "error": {
@@ -875,7 +875,7 @@
     "tokenFixSystemdCmd": "systemctl --user restart research-claw"
   },
   "modelCatalog": {
-    "aligned": "Aligned context window for {{count}} model(s) from OpenClaw's catalog"
+    "aligned": "Aligned context window for {{count}} model(s) from the model catalog"
   },
   "status": {
     "connected": "Connected",
