@@ -94,6 +94,17 @@ function getConfigActionButton(): HTMLButtonElement {
   return btn as HTMLButtonElement;
 }
 
+/**
+ * The "Saved API profiles" list lives inside a collapsed-by-default Collapse,
+ * so its items are unmounted until the panel header is clicked open. Tests that
+ * interact with inline profile cards must expand it first.
+ */
+function expandApiProfiles(): void {
+  act(() => {
+    fireEvent.click(screen.getByText('settings.apiProfilesTitle'));
+  });
+}
+
 describe('SettingsPanel', () => {
   beforeEach(() => {
     mockModalConfirm.mockReset();
@@ -806,6 +817,7 @@ describe('Saved API profile switch', () => {
     useConfigStore.setState({ gatewayConfig: makeTwoProfileConfig() });
 
     render(<SettingsPanel />);
+    expandApiProfiles();
 
     // The non-active profile (Relay B) exposes a "Use" control.
     const useButton = screen.getByText('settings.apiProfilesUse');
@@ -843,6 +855,7 @@ describe('Saved API profile switch', () => {
     useConfigStore.setState({ gatewayConfig: makeTwoProfileConfig() });
 
     render(<SettingsPanel />);
+    expandApiProfiles();
 
     const useButton = screen.getByText('settings.apiProfilesUse');
     await act(async () => {
@@ -1246,6 +1259,7 @@ describe('Delete active profile re-baselines the form', () => {
 
     render(<SettingsPanel />);
     expect(getConfigSaveButton().disabled).toBe(true);
+    expandApiProfiles();
 
     // The active profile (relay-a) shows an "In use" tag + a delete button.
     const inUse = screen.getByText('settings.apiProfilesInUse');
@@ -1803,6 +1817,7 @@ describe('Config picker — re-select guard, draft card, Apply/Save label', () =
 
     // Not dirty on load → footer button disabled.
     expect(getConfigActionButton().disabled).toBe(true);
+    expandApiProfiles();
 
     // Click the active inline card (located via its "In use" tag).
     const card = screen.getByText('settings.apiProfilesInUse').closest('.ant-list-item') as HTMLElement;
@@ -1831,6 +1846,7 @@ describe('Config picker — re-select guard, draft card, Apply/Save label', () =
       } as unknown as ReturnType<typeof makeGatewayConfig>,
     });
     render(<SettingsPanel />);
+    expandApiProfiles();
 
     expect(getConfigActionButton().disabled).toBe(true);
 
@@ -1947,13 +1963,21 @@ describe('Config picker — re-select guard, draft card, Apply/Save label', () =
   it('surfaces the just-added draft as an unsaved card in the inline profile list', () => {
     useConfigStore.setState({ gatewayConfig: makeProfilesConfig() });
     render(<SettingsPanel />);
+    expandApiProfiles();
 
     // No draft marker before adding.
     expect(screen.queryByText('providerPicker.unsavedDraft')).toBeNull();
 
+    // The "Add" control is a link button nested in the collapse header's `extra`.
+    // Exclude the header itself (also role=button, text spans title + Add) so the
+    // click hits Add (stopPropagation) instead of toggling the panel shut.
     const addBtn = screen
       .getAllByRole('button')
-      .find((b) => (b.textContent ?? '').includes('settings.apiProfilesAdd')) as HTMLButtonElement;
+      .find(
+        (b) =>
+          (b.textContent ?? '').includes('settings.apiProfilesAdd') &&
+          !(b.textContent ?? '').includes('settings.apiProfilesTitle'),
+      ) as HTMLButtonElement;
     act(() => fireEvent.click(addBtn));
 
     // The inline list now renders the draft with the shared unsaved marker.
