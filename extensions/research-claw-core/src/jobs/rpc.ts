@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { RegisterMethod } from '../types.js';
 import { JobService, type JobStatus } from './service.js';
+import { formatJobTitleFromMessage } from './title.js';
 
 interface JobRpcOptions {
   syncOpenClawSubagents?: () => unknown;
@@ -17,9 +18,7 @@ export function registerJobRpc(registerMethod: RegisterMethod, service: JobServi
   registerMethod('rc.longTask.submit', (params) => {
     const message = typeof params.message === 'string' ? params.message.trim() : '';
     if (!message) throw new Error('message is required');
-    const title = deriveLongTaskTitle(
-      typeof params.display_title === 'string' ? params.display_title : message,
-    );
+    const title = formatJobTitleFromMessage(message);
     const sessionKey = typeof params.session_key === 'string' ? params.session_key : null;
     const references = Array.isArray(params.references)
       ? params.references.filter((item): item is string => typeof item === 'string')
@@ -79,12 +78,6 @@ export function registerJobRpc(registerMethod: RegisterMethod, service: JobServi
   registerMethod('rc.job.markStalled', (params) => ({
     changed: service.markStalled(typeof params.stale_seconds === 'number' ? params.stale_seconds : 90),
   }));
-}
-
-function deriveLongTaskTitle(value: string): string {
-  const compact = value.replace(/\s+/g, ' ').trim();
-  if (!compact) return '后台长任务';
-  return compact.length > 80 ? `${compact.slice(0, 80)}...` : compact;
 }
 
 function formatDbDate(value: number): string {
