@@ -5,7 +5,7 @@
 CONFIG_DIR=/app/config
 CONFIG_FILE=$CONFIG_DIR/openclaw.json
 CONFIG_VERSION_FILE=$CONFIG_DIR/.config-version
-IMAGE_VERSION="0.7.3"
+IMAGE_VERSION="0.7.4"
 PORT=${PORT:-28789}
 
 # --- One-time migration: v0.5.3 fixed volume mount from /root → /app ---
@@ -219,6 +219,28 @@ node -e "
     cfg.agents.defaults.workspace = abs(cfg.agents.defaults.workspace); changed = true;
   }
   if (changed) { const o=JSON.stringify(cfg,null,2)+'\n',t=f+'.tmp.'+process.pid; fs.writeFileSync(t,o); fs.renameSync(t,f); }
+" 2>/dev/null || true
+
+# --- Ensure research-plugins is in plugins.load.paths (Docker only) ---
+# RP lives at /root/.openclaw/extensions/research-plugins (rc-state volume) — NOT under
+# /app/extensions where OC discovers the baked path plugins, and not in the config
+# template's load.paths. Without an explicit load-path entry it is allow-listed but never
+# loaded, silently losing all 34 agent tools (SkillSearch still indexes its catalog).
+# Native installs auto-discover ~/.openclaw/extensions, so this gap is Docker-specific.
+# Idempotent: matched by suffix so re-runs don't duplicate.
+node -e "
+  const fs = require('fs');
+  const f = '$CONFIG_FILE', rp = '/root/.openclaw/extensions/research-plugins';
+  const cfg = JSON.parse(fs.readFileSync(f, 'utf8'));
+  if (!cfg.plugins) cfg.plugins = {};
+  if (!cfg.plugins.load) cfg.plugins.load = {};
+  if (!Array.isArray(cfg.plugins.load.paths)) cfg.plugins.load.paths = [];
+  if (!cfg.plugins.load.paths.some(p => p === rp || p.endsWith('/extensions/research-plugins'))) {
+    cfg.plugins.load.paths.push(rp);
+    const o = JSON.stringify(cfg, null, 2) + '\n', t = f + '.tmp.' + process.pid;
+    fs.writeFileSync(t, o); fs.renameSync(t, f);
+    console.log('[research-claw] Added research-plugins to plugins.load.paths');
+  }
 " 2>/dev/null || true
 
 # --- Sync research-plugins from image → volume if version differs ---
