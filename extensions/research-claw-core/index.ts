@@ -857,7 +857,7 @@ const plugin: PluginDefinition = {
   id: 'research-claw-core',
   name: 'Research-Claw Core',
   description: 'Literature library, task management, and workspace tracking for academic research',
-  version: '0.7.2',
+  version: '0.7.3',
   contracts: {
     tools: ['task_flow_stage'],
   },
@@ -1026,7 +1026,7 @@ const plugin: PluginDefinition = {
     });
 
     if (!_registrationDone) {
-    // ── 4. Register tools (40 total) ─────────────────────────────────
+    // ── 4. Register tools (51 total) ─────────────────────────────────
     for (const tool of createLiteratureTools(litService)) {
       api.registerTool(tool);
     }
@@ -2461,7 +2461,7 @@ const plugin: PluginDefinition = {
       api.logger.warn('registerHook not available — system files will remain at workspace root');
     }
 
-    api.logger.info('Research-Claw Core registered (40 tools, 89 WS RPC + 2 HTTP = 91 interfaces, 10 hooks, 1 session monitoring service)');
+    api.logger.info('Research-Claw Core registered (51 tools, 122 WS RPC + 2 HTTP = 124 interfaces, 9 hooks, 1 session monitoring service)');
     _registrationDone = true;
     }
   },
