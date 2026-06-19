@@ -1086,7 +1086,13 @@ if [ -d "$PLUGIN_DIR" ]; then
       RP_TGZ=$(ls "$RP_FALLBACK_DIR"/wentorai-research-plugins-*.tgz 2>/dev/null | head -1)
       if [ -n "$RP_TGZ" ]; then
         mkdir -p "$PLUGIN_DIR"
-        tar xzf "$RP_TGZ" --strip-components=1 -C "$PLUGIN_DIR" 2>>"$RP_LOG" && RP_FALLBACK_OK=true
+        # Raw tarball has no node_modules; the OC plugin (main: dist/index.js)
+        # imports @sinclair/typebox at load, so install prod deps or the plugin
+        # fails to load. Only flip the success flag once deps are in place.
+        if tar xzf "$RP_TGZ" --strip-components=1 -C "$PLUGIN_DIR" 2>>"$RP_LOG" \
+          && ( cd "$PLUGIN_DIR" && npm install --omit=dev --ignore-scripts --no-audit --no-fund ${NPM_REGISTRY:+--registry "$NPM_REGISTRY"} >>"$RP_LOG" 2>&1 ); then
+          RP_FALLBACK_OK=true
+        fi
       fi
     fi
     rm -rf "$RP_FALLBACK_DIR"
@@ -1132,7 +1138,13 @@ else
       RP_TGZ=$(ls "$RP_FALLBACK_DIR"/wentorai-research-plugins-*.tgz 2>/dev/null | head -1)
       if [ -n "$RP_TGZ" ]; then
         mkdir -p "$PLUGIN_DIR"
-        tar xzf "$RP_TGZ" --strip-components=1 -C "$PLUGIN_DIR" 2>>"$RP_LOG" && RP_EXIT=0
+        # Raw tarball has no node_modules; the OC plugin (main: dist/index.js)
+        # imports @sinclair/typebox at load, so install prod deps or the plugin
+        # fails to load. Only clear the error flag once deps are in place.
+        if tar xzf "$RP_TGZ" --strip-components=1 -C "$PLUGIN_DIR" 2>>"$RP_LOG" \
+          && ( cd "$PLUGIN_DIR" && npm install --omit=dev --ignore-scripts --no-audit --no-fund ${NPM_REGISTRY:+--registry "$NPM_REGISTRY"} >>"$RP_LOG" 2>&1 ); then
+          RP_EXIT=0
+        fi
       fi
     fi
     rm -rf "$RP_FALLBACK_DIR"

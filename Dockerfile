@@ -126,10 +126,15 @@ RUN mkdir -p /defaults/research-plugins && cd /tmp && \
     npm pack @wentorai/research-plugins && \
     tar xzf wentorai-research-plugins-*.tgz -C /defaults/research-plugins --strip-components=1 && \
     rm -f wentorai-research-plugins-*.tgz && \
+    # The plugin (main: dist/index.js) imports @sinclair/typebox at load; the raw
+    # tarball ships no node_modules, so install prod deps or the plugin fails to
+    # load (losing all agent tools). --ignore-scripts: typebox is pure JS.
+    ( cd /defaults/research-plugins && npm install --omit=dev --ignore-scripts --no-audit --no-fund ) && \
+    test -f /defaults/research-plugins/node_modules/@sinclair/typebox/package.json && \
     test -f /defaults/research-plugins/catalog.json && \
     node -e "process.stdout.write(require('/defaults/research-plugins/package.json').version)" \
     > /defaults/rp-version.txt && \
-    echo "[build] baked research-plugins $(cat /defaults/rp-version.txt) with catalog.json"
+    echo "[build] baked research-plugins $(cat /defaults/rp-version.txt) with catalog.json + deps"
 
 # 烘焙配置模板 + 系统提示词到 /defaults/，entrypoint 会同步到 volume
 RUN mkdir -p /defaults/bootstrap-prompts && \
