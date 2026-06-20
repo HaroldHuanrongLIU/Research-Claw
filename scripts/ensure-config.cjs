@@ -29,9 +29,17 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const REQUIRED_ALLOW = ['research-claw-core', 'research-plugins', 'openclaw-weixin', 'dual-model-supervisor'];
-const RC_PLUGIN_IDS = ['research-claw-core', 'openclaw-weixin', 'research-plugins', 'dual-model-supervisor'];
-const RC_EXTENSION_DIRS = ['extensions/research-claw-core', 'extensions/openclaw-weixin', 'extensions/dual-model-supervisor'];
+// `browser` is a bundled OC plugin but the trust list is restrictive: when
+// plugins.allow is non-empty, a plugin absent from it is NOT enabled-by-config.
+// The gateway still auto-enables browser in-memory (settings read config → show
+// 已启用), but the browser control service re-reads the on-disk config and, not
+// finding `browser` in allow, refuses to start → "browser control disabled" →
+// all browser-driven skills (CNKI) fail. So `browser` MUST be allow-listed.
+// `research-superpower` is an RC path extension (rp_* tools); it needs allow +
+// load.paths + install record like the other RC extensions.
+const REQUIRED_ALLOW = ['browser', 'research-claw-core', 'research-plugins', 'openclaw-weixin', 'dual-model-supervisor', 'research-superpower'];
+const RC_PLUGIN_IDS = ['research-claw-core', 'openclaw-weixin', 'research-plugins', 'dual-model-supervisor', 'research-superpower'];
+const RC_EXTENSION_DIRS = ['extensions/research-claw-core', 'extensions/openclaw-weixin', 'extensions/dual-model-supervisor', 'extensions/research-superpower'];
 const RC_DB_PATH = path.join(os.homedir(), '.research-claw', 'library.db');
 // Provenance install records for all RC plugins (eliminates "loaded without
 // install/load-path provenance" warnings from OC's plugin loader)
@@ -41,6 +49,7 @@ const PLUGIN_INSTALL_RECORDS = {
   'dual-model-supervisor':    { source: 'path', sourcePath: './extensions/dual-model-supervisor' },
   'research-plugins':         { source: 'npm',  spec: '@wentorai/research-plugins',
                                 installPath: '~/.openclaw/extensions/research-plugins' },
+  'research-superpower':      { source: 'path', sourcePath: './extensions/research-superpower' },
 };
 
 function normalizeRcDbPath(configPath, rawPath) {
@@ -326,6 +335,7 @@ function ensureConfig(filePath) {
       'research-claw-core': { enabled: true, config: { dbPath: RC_DB_PATH, autoTrackGit: true, defaultCitationStyle: 'apa', heartbeatDeadlineWarningHours: 48, pptRoot: 'integrations/ppt-master' } },
       'openclaw-weixin': { enabled: true },
       'dual-model-supervisor': { enabled: true },
+      'research-superpower': { enabled: true },
     };
     changed = true;
   }
