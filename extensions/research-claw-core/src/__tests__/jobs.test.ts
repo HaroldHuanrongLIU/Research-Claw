@@ -149,6 +149,30 @@ describe('JobService', () => {
     expect(completed.updated_at).toBe('2026-06-14 12:03:00');
     expect(service.list({ session_key: 'agent:main:subagent:abc' })).toHaveLength(1);
   });
+
+  it('upserts external job steps without touching the supplied job timestamp', () => {
+    const job = service.upsertExternal({
+      id: 'longtask:steps',
+      type: 'openclaw-subagent',
+      title: 'Tracked work',
+      status: 'running',
+      progress: 40,
+      current_step: 'Executing',
+      updated_at: '2026-06-14 12:00:00',
+      steps: [
+        { key: 'scope', label: '确认范围与边界', status: 'completed', progress: 100 },
+        { key: 'execute', label: '执行任务', status: 'running', progress: 40, checkpoint: { batch: 2 } },
+      ],
+    });
+
+    expect(job.updated_at).toBe('2026-06-14 12:00:00');
+    expect(job.steps?.map((step) => step.step_key)).toEqual(['scope', 'execute']);
+    expect(job.steps?.[1]).toMatchObject({
+      status: 'running',
+      progress: 40,
+      checkpoint: { batch: 2 },
+    });
+  });
 });
 
 describe('OpenClaw subagent job sync', () => {
@@ -216,6 +240,16 @@ describe('OpenClaw subagent job sync', () => {
     expect(jobs[0].completed_at).toBe('2026-06-14 12:05:00');
     expect(jobs[0].updated_at).toBe('2026-06-14 12:05:00');
     expect(jobs[0].checkpoint.latest_text).toContain('整理报告');
+    expect(jobs[0].checkpoint).toMatchObject({
+      protocol: 'bootstrap-2026-06-21',
+      resume_policy: 'resume-from-latest',
+    });
+    expect((jobs[0].input.orchestration as { production_state_default?: string }).production_state_default).toBe('read-only');
+    expect(jobs[0].steps?.map((step) => [step.step_key, step.status, step.progress])).toEqual([
+      ['scope', 'completed', 100],
+      ['execute', 'completed', 100],
+      ['review', 'completed', 100],
+    ]);
 
     syncOpenClawSubagentJobs(service, { sessionsJsonPath: sessionsPath });
     expect(service.get('openclaw:child-session-id').updated_at).toBe('2026-06-14 12:05:00');
@@ -276,6 +310,7 @@ describe('OpenClaw subagent job sync', () => {
       progress: 100,
     });
     expect(jobs[0].input.linked_job_id).toBe('longtask:tracked-job');
+    expect(jobs[0].steps?.find((step) => step.step_key === 'review')?.status).toBe('completed');
   });
 
   it('rebinds a subagent to a queued long task via spawnedBy when the transcript omits the Job ID', () => {
@@ -321,6 +356,7 @@ describe('OpenClaw subagent job sync', () => {
     expect(jobs[0].input.bound_via).toBe('spawned_by');
     // Original submission payload survives the rebind.
     expect(jobs[0].input.references).toEqual(['a.ts', 'b.ts']);
+    expect((jobs[0].input.orchestration as { checkpoint_policy?: string }).checkpoint_policy).toBe('resume-from-latest');
   });
 
   it('serves a cached transcript without re-reading when mtime and size are unchanged', () => {
@@ -414,6 +450,7 @@ describe('job tools and RPC', () => {
     const start = tools.find((tool) => tool.name === 'job_start')!;
     const result = await start.execute('call-1', { type: 'upload', title: 'Upload' }) as { details: { id: string } };
     expect(service.get(result.details.id).title).toBe('Upload');
+    expect((service.get(result.details.id).input.orchestration as { source?: string }).source).toBe('job-tool');
   });
 
   it('registers list/get/cancel/resume RPC methods', async () => {
@@ -446,6 +483,14 @@ describe('job tools and RPC', () => {
     expect(submitted.job.type).toBe('openclaw-subagent');
     expect(submitted.job.status).toBe('queued');
     expect(submitted.job.title).toBe('文献任务: 批量整理 workspace 里的论文，生成报告');
-    expect(service.get(submitted.job.id).input.source).toBe('auto-long-task');
+    const stored = service.get(submitted.job.id);
+    expect(stored.input.source).toBe('auto-long-task');
+    expect(stored.checkpoint).toMatchObject({
+      protocol: 'bootstrap-2026-06-21',
+      resume_policy: 'resume-from-latest',
+      self_check_required: true,
+    });
+    expect((stored.input.orchestration as { prohibited_operations?: string[] }).prohibited_operations).toContain('direct-production-db-mutation');
+    expect(stored.steps?.map((step) => step.step_key)).toEqual(['scope', 'execute', 'review']);
   });
 });

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { RegisterMethod } from '../types.js';
 import { JobService, type JobStatus } from './service.js';
 import { formatJobTitleFromMessage } from './title.js';
+import { createDefaultJobSteps, createJobOrchestrationPolicy } from './protocol.js';
 
 interface JobRpcOptions {
   syncOpenClawSubagents?: () => unknown;
@@ -27,6 +28,11 @@ export function registerJobRpc(registerMethod: RegisterMethod, service: JobServi
       ? params.detection as Record<string, unknown>
       : undefined;
     const now = formatDbDate(Date.now());
+    const orchestration = createJobOrchestrationPolicy({
+      source: 'auto-long-task',
+      message,
+      references,
+    });
     const job = service.upsertExternal({
       id: `longtask:${randomUUID()}`,
       type: 'openclaw-subagent',
@@ -40,12 +46,17 @@ export function registerJobRpc(registerMethod: RegisterMethod, service: JobServi
         message,
         references,
         detection,
+        orchestration,
       },
       checkpoint: {
         submitted_at: now,
         auto_tracked: true,
+        protocol: orchestration.protocol,
+        resume_policy: orchestration.checkpoint_policy,
+        self_check_required: orchestration.self_check_required,
       },
       heartbeat_at: now,
+      steps: createDefaultJobSteps(),
     });
     return { job };
   });

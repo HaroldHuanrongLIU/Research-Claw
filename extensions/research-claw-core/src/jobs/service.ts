@@ -40,6 +40,17 @@ export interface JobStep {
   updated_at: string;
 }
 
+export interface JobStepInput {
+  key: string;
+  label: string;
+  status?: JobStepStatus;
+  progress?: number;
+  checkpoint?: Record<string, unknown>;
+  error?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+}
+
 interface JobRow extends Omit<Job, 'input' | 'result' | 'checkpoint' | 'steps'> {
   input_json: string;
   result_json: string | null;
@@ -104,62 +115,67 @@ export class JobService {
     started_at?: string | null;
     completed_at?: string | null;
     updated_at?: string | null;
+    steps?: JobStepInput[];
   }): Job {
     const progress = clampProgress(input.progress);
-    this.db.prepare(
-      `INSERT INTO rc_jobs (
-         id, type, title, session_key, status, progress, current_step,
-         input_json, result_json, checkpoint_json, error, heartbeat_at, started_at, completed_at, updated_at
-       )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
-       ON CONFLICT(id) DO UPDATE SET
-         type=excluded.type,
-         title=excluded.title,
-         session_key=excluded.session_key,
-         status=CASE
-           WHEN rc_jobs.status='cancelled' AND excluded.status IN ('queued','running','stalled')
-             THEN rc_jobs.status
-           ELSE excluded.status
-         END,
-         progress=CASE
-           WHEN rc_jobs.status='cancelled' AND excluded.status IN ('queued','running','stalled')
-             THEN rc_jobs.progress
-           ELSE excluded.progress
-         END,
-         current_step=CASE
-           WHEN rc_jobs.status='cancelled' AND excluded.status IN ('queued','running','stalled')
-             THEN rc_jobs.current_step
-           ELSE excluded.current_step
-         END,
-         input_json=excluded.input_json,
-         result_json=COALESCE(excluded.result_json, rc_jobs.result_json),
-         checkpoint_json=excluded.checkpoint_json,
-         error=CASE
-           WHEN rc_jobs.status='cancelled' AND excluded.status IN ('queued','running','stalled')
-             THEN rc_jobs.error
-           ELSE excluded.error
-         END,
-         heartbeat_at=excluded.heartbeat_at,
-         started_at=COALESCE(rc_jobs.started_at, excluded.started_at),
-         completed_at=COALESCE(excluded.completed_at, rc_jobs.completed_at),
-         updated_at=excluded.updated_at`,
-    ).run(
-      input.id,
-      input.type,
-      input.title,
-      input.session_key ?? null,
-      input.status,
-      progress,
-      input.current_step ?? null,
-      JSON.stringify(input.input ?? {}),
-      input.result === undefined ? null : JSON.stringify(input.result),
-      JSON.stringify(input.checkpoint ?? {}),
-      input.error ?? null,
-      input.heartbeat_at ?? null,
-      input.started_at ?? null,
-      input.completed_at ?? null,
-      input.updated_at ?? null,
-    );
+    const tx = this.db.transaction(() => {
+      this.db.prepare(
+        `INSERT INTO rc_jobs (
+           id, type, title, session_key, status, progress, current_step,
+           input_json, result_json, checkpoint_json, error, heartbeat_at, started_at, completed_at, updated_at
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
+         ON CONFLICT(id) DO UPDATE SET
+           type=excluded.type,
+           title=excluded.title,
+           session_key=excluded.session_key,
+           status=CASE
+             WHEN rc_jobs.status='cancelled' AND excluded.status IN ('queued','running','stalled')
+               THEN rc_jobs.status
+             ELSE excluded.status
+           END,
+           progress=CASE
+             WHEN rc_jobs.status='cancelled' AND excluded.status IN ('queued','running','stalled')
+               THEN rc_jobs.progress
+             ELSE excluded.progress
+           END,
+           current_step=CASE
+             WHEN rc_jobs.status='cancelled' AND excluded.status IN ('queued','running','stalled')
+               THEN rc_jobs.current_step
+             ELSE excluded.current_step
+           END,
+           input_json=excluded.input_json,
+           result_json=COALESCE(excluded.result_json, rc_jobs.result_json),
+           checkpoint_json=excluded.checkpoint_json,
+           error=CASE
+             WHEN rc_jobs.status='cancelled' AND excluded.status IN ('queued','running','stalled')
+               THEN rc_jobs.error
+             ELSE excluded.error
+           END,
+           heartbeat_at=excluded.heartbeat_at,
+           started_at=COALESCE(rc_jobs.started_at, excluded.started_at),
+           completed_at=COALESCE(excluded.completed_at, rc_jobs.completed_at),
+           updated_at=excluded.updated_at`,
+      ).run(
+        input.id,
+        input.type,
+        input.title,
+        input.session_key ?? null,
+        input.status,
+        progress,
+        input.current_step ?? null,
+        JSON.stringify(input.input ?? {}),
+        input.result === undefined ? null : JSON.stringify(input.result),
+        JSON.stringify(input.checkpoint ?? {}),
+        input.error ?? null,
+        input.heartbeat_at ?? null,
+        input.started_at ?? null,
+        input.completed_at ?? null,
+        input.updated_at ?? null,
+      );
+      if (input.steps?.length) this.upsertSteps(input.id, input.steps, input.updated_at ?? null);
+    });
+    tx();
     return this.get(input.id);
   }
 
@@ -211,6 +227,38 @@ export class JobService {
       else map.set(row.job_id, [step]);
     }
     return map;
+  }
+
+  private upsertSteps(jobId: string, steps: JobStepInput[], updatedAt: string | null): void {
+    const stmt = this.db.prepare(
+      `INSERT INTO rc_job_steps (
+         job_id, step_key, label, status, progress, checkpoint_json, error, started_at, completed_at, updated_at
+       )
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
+       ON CONFLICT(job_id, step_key) DO UPDATE SET
+         label=excluded.label,
+         status=excluded.status,
+         progress=excluded.progress,
+         checkpoint_json=excluded.checkpoint_json,
+         error=excluded.error,
+         started_at=COALESCE(rc_job_steps.started_at, excluded.started_at),
+         completed_at=COALESCE(excluded.completed_at, rc_job_steps.completed_at),
+         updated_at=excluded.updated_at`,
+    );
+    for (const step of steps) {
+      stmt.run(
+        jobId,
+        step.key,
+        step.label,
+        step.status ?? 'pending',
+        clampProgress(step.progress),
+        JSON.stringify(step.checkpoint ?? {}),
+        step.error ?? null,
+        step.started_at ?? null,
+        step.completed_at ?? null,
+        updatedAt,
+      );
+    }
   }
 
   start(id: string, currentStep?: string): Job {

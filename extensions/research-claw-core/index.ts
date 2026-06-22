@@ -57,6 +57,7 @@ import { ClaudeMemSyncService } from './src/memory/claude-mem-sync.js';
 import { hydrateDashboardSystemPromptFromConfigPath } from './src/dashboard/config.js';
 import { formatDashboardSystemPromptBlock } from './src/dashboard/prompt-append.js';
 import { TASK_FLOW_AGENT_GUIDANCE } from './src/tasks/task-flow-prompt.js';
+import { SELF_CHECK_AGENT_GUIDANCE } from './src/self-check/prompt.js';
 import { registerDashboardRpc } from './src/dashboard/rpc.js';
 import { PaperReviewService } from './src/paper-review/service.js';
 import { registerPaperReviewRpc } from './src/paper-review/rpc.js';
@@ -156,7 +157,7 @@ interface PluginDefinition {
 // initialized once and reused — creating duplicates wastes file handles
 // and causes git lock races.
 let _initialized = false;
-let _registrationDone = false;
+let _hooksRegistered = false;
 let _dbManager: DatabaseManager | null = null;
 let _litService: InstanceType<typeof LiteratureService> | null = null;
 let _taskService: InstanceType<typeof TaskService> | null = null;
@@ -853,13 +854,67 @@ function resolvePptRoot(api: PluginApi, cfg: PluginConfig): string {
 
 const DEFAULT_RC_DB_PATH = path.join(os.homedir(), '.research-claw', 'library.db');
 
+const RESEARCH_CLAW_AGENT_TOOLS = [
+  'library_add_paper',
+  'library_search',
+  'library_list_papers',
+  'library_update_paper',
+  'library_get_paper',
+  'library_delete_paper',
+  'library_export_bibtex',
+  'library_reading_stats',
+  'library_batch_add',
+  'library_manage_collection',
+  'library_tag_paper',
+  'library_add_note',
+  'library_import_bibtex',
+  'library_citation_graph',
+  'library_zotero',
+  'library_endnote',
+  'library_import_ris',
+  'task_create',
+  'task_list',
+  'task_complete',
+  'task_update',
+  'task_link',
+  'task_note',
+  'task_link_file',
+  'cron_update_schedule',
+  'send_notification',
+  'task_flow_stage',
+  'task_delete',
+  'workspace_save',
+  'workspace_read',
+  'workspace_list',
+  'workspace_diff',
+  'workspace_history',
+  'workspace_restore',
+  'workspace_move',
+  'workspace_export',
+  'workspace_delete',
+  'workspace_append',
+  'workspace_download',
+  'monitor_create',
+  'monitor_list',
+  'monitor_report',
+  'monitor_get_context',
+  'monitor_note',
+  'ppt_init',
+  'ppt_export',
+  'skill_search',
+  'job_start',
+  'job_checkpoint',
+  'job_status',
+  'job_finish',
+];
+
 const plugin: PluginDefinition = {
   id: 'research-claw-core',
   name: 'Research-Claw Core',
   description: 'Literature library, task management, and workspace tracking for academic research',
   version: '0.7.4',
   contracts: {
-    tools: ['task_flow_stage'],
+    tools: RESEARCH_CLAW_AGENT_TOOLS,
   },
 
   register(api) {
@@ -1025,8 +1080,12 @@ const plugin: PluginDefinition = {
       },
     });
 
-    if (!_registrationDone) {
     // ── 4. Register tools (51 total) ─────────────────────────────────
+    // Tool registration is runtime-scoped in OpenClaw. The same plugin module
+    // may be reused across discovery, gateway, hot-reload, and agent-runtime
+    // passes, but each pass receives a fresh api/registry. Keep stateful
+    // services process-singleton above, and always publish tool descriptors
+    // into the current registry here.
     for (const tool of createLiteratureTools(litService)) {
       api.registerTool(tool);
     }
@@ -1163,14 +1222,11 @@ const plugin: PluginDefinition = {
         },
       });
     }
-    } // end if (!_registrationDone) — tools only
 
     // ── 5. Register RPC methods (79 WS total) ────────────────────────
     // NOTE: RPC + HTTP routes MUST be registered on EVERY register() call.
     // OC calls register() twice: discovery pass (tools only) and gateway pass
     // (where registerGatewayMethod actually wires up the WS handler).
-    // The _registrationDone guard above covers tools only — tools registered
-    // on the first pass are visible globally, but gateway methods are NOT.
     // Rate limiting not needed: local satellite, no network exposure (ws://127.0.0.1:28789 only)
     //
     // Bridge: our RPC handlers use a simple (params) => result signature,
@@ -1679,7 +1735,7 @@ const plugin: PluginDefinition = {
     // ── 7. Register hooks ─────────────────────────────────────────────
     // Hooks MUST only be registered once — duplicate registration causes
     // handlers to fire multiple times per event.
-    if (!_registrationDone) {
+    if (!_hooksRegistered) {
 
     // Hook 1: Inject research context into agent prompt
     //
@@ -1804,6 +1860,7 @@ const plugin: PluginDefinition = {
         }
 
         lines.push(TASK_FLOW_AGENT_GUIDANCE);
+        lines.push(SELF_CHECK_AGENT_GUIDANCE);
 
         return lines.length > 0 ? { prependContext: lines.join('\n') } : {};
       } catch {
@@ -2462,7 +2519,7 @@ const plugin: PluginDefinition = {
     }
 
     api.logger.info('Research-Claw Core registered (51 tools, 122 WS RPC + 2 HTTP = 124 interfaces, 9 hooks, 1 session monitoring service)');
-    _registrationDone = true;
+    _hooksRegistered = true;
     }
   },
 };

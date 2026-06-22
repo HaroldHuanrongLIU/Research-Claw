@@ -1,5 +1,6 @@
 import type { ToolDefinition } from '../types.js';
 import { JobService, type JobStatus, type JobStepStatus } from './service.js';
+import { createJobOrchestrationPolicy } from './protocol.js';
 
 const ok = (text: string, details?: unknown) => ({ content: [{ type: 'text', text }], details: details ?? {} });
 const fail = (message: string) => ({ content: [{ type: 'text', text: `Error: ${message}` }], details: { error: message } });
@@ -8,7 +9,7 @@ export function createJobTools(service: JobService): ToolDefinition[] {
   return [
     {
       name: 'job_start',
-      description: 'Create a persistent background job before starting work that may exceed one agent turn. Return the job id to the user promptly; do not block-poll for completion.',
+      description: 'Create a persistent background job before starting work that may exceed one agent turn. Include explicit scope, allowed writes, and review boundaries in input when possible. Return the job id promptly; do not block-poll for completion.',
       parameters: {
         type: 'object',
         properties: {
@@ -23,10 +24,24 @@ export function createJobTools(service: JobService): ToolDefinition[] {
           const type = typeof params.type === 'string' ? params.type.trim() : '';
           const title = typeof params.title === 'string' ? params.title.trim() : '';
           if (!type || !title) return fail('type and title are required');
+          const rawInput = typeof params.input === 'object' && params.input && !Array.isArray(params.input)
+            ? params.input as Record<string, unknown>
+            : {};
+          const references = Array.isArray(rawInput.references)
+            ? rawInput.references.filter((item): item is string => typeof item === 'string')
+            : [];
+          const input = {
+            ...rawInput,
+            orchestration: rawInput.orchestration ?? createJobOrchestrationPolicy({
+              source: 'job-tool',
+              message: title,
+              references,
+            }),
+          };
           const job = service.create({
             type, title,
             session_key: typeof params.session_key === 'string' ? params.session_key : undefined,
-            input: typeof params.input === 'object' && params.input && !Array.isArray(params.input) ? params.input as Record<string, unknown> : undefined,
+            input,
             steps: Array.isArray(params.steps) ? params.steps.filter((s): s is { key: string; label: string } =>
               typeof s === 'object' && s !== null && typeof (s as { key?: unknown }).key === 'string' && typeof (s as { label?: unknown }).label === 'string') : undefined,
           });
@@ -36,7 +51,7 @@ export function createJobTools(service: JobService): ToolDefinition[] {
     },
     {
       name: 'job_checkpoint',
-      description: 'Persist progress and heartbeat for a background job. Call after each batch or major step.',
+      description: 'Persist progress and heartbeat for a background job. Call after each batch or major step, and include enough checkpoint data to resume from the latest completed work.',
       parameters: {
         type: 'object',
         properties: {

@@ -4,6 +4,11 @@ import * as path from 'node:path';
 
 import { JobService, type JobStatus } from './service.js';
 import { formatJobTitleFromMessage } from './title.js';
+import {
+  createJobOrchestrationPolicy,
+  createSubagentSyncSteps,
+  mergeJobSteps,
+} from './protocol.js';
 
 interface Logger {
   debug?: (message: string) => void;
@@ -106,6 +111,24 @@ export function syncOpenClawSubagentJobs(
       const currentStep = preserveResumeRequest
         ? existingJob?.current_step ?? '已请求 OpenClaw 子会话继续'
         : currentStepFor(status, session.updatedAt, transcript.latestText);
+      const message = transcript.title || existingJob?.input?.message;
+      const references = Array.isArray(existingJob?.input?.references)
+        ? existingJob.input.references.filter((item): item is string => typeof item === 'string')
+        : [];
+      const orchestration = existingJob?.input?.orchestration && typeof existingJob.input.orchestration === 'object'
+        ? existingJob.input.orchestration
+        : createJobOrchestrationPolicy({
+          source: 'openclaw-subagent',
+          message: typeof message === 'string' ? message : title,
+          references,
+        });
+      const steps = mergeJobSteps(existingJob?.steps, createSubagentSyncSteps({
+        status,
+        latestText: transcript.latestText,
+        error: transcript.error ?? currentStep,
+        startedAt,
+        completedAt,
+      }));
 
       service.upsertExternal({
         id: jobId,
@@ -130,12 +153,16 @@ export function syncOpenClawSubagentJobs(
           session_file: session.sessionFile,
           model: session.model,
           provider: session.modelProvider,
+          orchestration,
         },
         checkpoint: {
           ...(existingJob?.checkpoint ?? {}),
           openclaw_status: session.status ?? 'unknown',
           updated_at: updatedAt,
           latest_text: transcript.latestText,
+          protocol: (orchestration as { protocol?: unknown }).protocol ?? 'bootstrap-2026-06-21',
+          resume_policy: (orchestration as { checkpoint_policy?: unknown }).checkpoint_policy ?? 'resume-from-latest',
+          self_check_required: Boolean((orchestration as { self_check_required?: unknown }).self_check_required),
         },
         result: status === 'completed' ? { summary: transcript.latestText } : undefined,
         error: status === 'failed' || status === 'stalled' ? transcript.error ?? currentStep : null,
@@ -143,6 +170,7 @@ export function syncOpenClawSubagentJobs(
         started_at: startedAt,
         completed_at: completedAt,
         updated_at: updatedAt,
+        steps,
       });
       synced++;
     } catch (err) {
