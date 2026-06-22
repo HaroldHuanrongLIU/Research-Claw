@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildAutoLongTaskPrompt,
   detectLongTaskIntent,
+  shouldPromoteLongTaskWithoutConfirmation,
 } from './long-task';
 import { sanitizeUserMessage } from './sanitize-message';
 
@@ -12,6 +13,19 @@ describe('long task detection', () => {
     expect(result.shouldAutoTrack).toBe(true);
     expect(result.reasons).toContain('bulk-scope');
     expect(result.title).toContain('整理 workspace');
+  });
+
+  it('detects long-running workspace scan wording for confirmation', () => {
+    const result = detectLongTaskIntent('帮我跑一个较长的 workspace 扫描任务');
+    expect(result.shouldAutoTrack).toBe(true);
+    expect(result.reasons).toContain('duration-hint');
+    expect(result.reasons).toContain('bulk-scope');
+    expect(result.reasons).toContain('action');
+  });
+
+  it('promotes high-confidence long-running workspace work without confirmation', () => {
+    const result = detectLongTaskIntent('帮我跑一个较长的 workspace 扫描任务');
+    expect(shouldPromoteLongTaskWithoutConfirmation(result)).toBe(true);
   });
 
   it('does not auto-track short explanation questions', () => {

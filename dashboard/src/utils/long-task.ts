@@ -19,6 +19,7 @@ interface BuildAutoLongTaskPromptOptions {
 
 const OPT_OUT_RE = /(?:不要|别|不必|不用).{0,8}(?:后台|长任务|子会话|异步|job|jobs)|(?:直接|马上|立即).{0,8}(?:回答|回复|说)|当前会话里?(?:直接)?(?:做|执行|回答)/i;
 const EXPLICIT_BACKGROUND_RE = /后台|长任务|子会话|异步|稍后|持续更新|不用等|不要等|放到\s*jobs?|background|subagent/i;
+const DURATION_HINT_RE = /较长|很长|耗时|费时|长时间|久一点|慢慢|大型|复杂|heavy|long[-\s]?running/i;
 const BULK_RE = /批量|全量|全部|所有|整个|整站|整库|全项目|workspace|工作区|目录|文件夹|多篇|一批|逐个/i;
 const ACTION_RE = /整理|扫描|处理|生成|汇总|归纳|检查|分析|修复|更新|迁移|同步|上传|下载|导出|转换|重构|跑|执行|收集|建立|创建/i;
 const ARTIFACT_RE = /论文|文献|报告|清单|索引|数据库|知识库|表格|PPT|幻灯片|数据集|仓库|代码库|日志/i;
@@ -33,12 +34,14 @@ export function detectLongTaskIntent(message: string, options: DetectLongTaskOpt
 
   let score = 0;
   const hasExplicit = EXPLICIT_BACKGROUND_RE.test(text);
+  const hasDurationHint = DURATION_HINT_RE.test(text);
   const hasBulk = BULK_RE.test(text);
   const hasAction = ACTION_RE.test(text);
   const hasArtifact = ARTIFACT_RE.test(text);
   const referenceCount = options.references?.length ?? 0;
 
   if (hasExplicit) { score += 4; reasons.push('explicit-background'); }
+  if (hasDurationHint) { score += 2; reasons.push('duration-hint'); }
   if (hasBulk) { score += 2; reasons.push('bulk-scope'); }
   if (hasAction) { score += 2; reasons.push('action'); }
   if (hasArtifact) { score += 1; reasons.push('artifact'); }
@@ -57,6 +60,15 @@ export function detectLongTaskIntent(message: string, options: DetectLongTaskOpt
     score,
     reasons,
   };
+}
+
+export function shouldPromoteLongTaskWithoutConfirmation(detection: LongTaskDetection): boolean {
+  const reasons = new Set(detection.reasons);
+  if (reasons.has('explicit-background')) return true;
+  return detection.score >= 6
+    && reasons.has('duration-hint')
+    && reasons.has('bulk-scope')
+    && reasons.has('action');
 }
 
 export function deriveLongTaskTitle(message: string): string {

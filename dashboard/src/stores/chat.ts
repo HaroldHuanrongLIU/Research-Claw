@@ -14,7 +14,7 @@ import { useJobsStore } from './jobs';
 import { primaryModelSupportsVision, useConfigStore } from './config';
 import { syncSystemPromptAppendToGateway } from '../utils/sync-system-prompt-append';
 import { appendReferenceBlock, dedupePaths, isImagePath } from '../utils/file-reference';
-import { buildAutoLongTaskPrompt, detectLongTaskIntent } from '../utils/long-task';
+import { buildAutoLongTaskPrompt, detectLongTaskIntent, shouldPromoteLongTaskWithoutConfirmation } from '../utils/long-task';
 import i18n from '../i18n';
 import { sanitizeUserMessage, CRON_REMINDER_RE } from '../utils/sanitize-message';
 import { sanitizeAssistantMessage } from '../utils/sanitize-assistant-message';
@@ -868,9 +868,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       // asked for it. Heuristic-only matches are the false-positive-prone case,
       // so confirm before changing behaviour from "answer now" to "spawn a
       // background subagent". Declining falls through to a normal inline turn.
-      const explicitBackground = longTask.reasons.includes('explicit-background');
+      const promoteSilently = shouldPromoteLongTaskWithoutConfirmation(longTask);
       const promote = longTask.shouldAutoTrack
-        && (explicitBackground || await confirmHeuristicLongTask(longTask.title));
+        && (promoteSilently || await confirmHeuristicLongTask(longTask.title));
       if (promote) {
         try {
           const submitted = await client.request<{ job: { id: string; title: string } }>('rc.longTask.submit', {
@@ -892,7 +892,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
           useUiStore.getState().setRightPanelTab('jobs');
           void useJobsStore.getState().loadJobs();
         } catch (err) {
-          console.warn('[Chat] Long task auto-submit failed; falling back to normal chat:', err);
+          console.warn('[Chat] Long task auto-submit failed:', err);
+          set({ lastError: err instanceof Error ? err.message : i18n.t('chat.sendFailed') });
+          return;
         }
       }
     }
