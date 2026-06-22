@@ -1,11 +1,24 @@
 ---
 file: MEMORY.md
-version: 1.1
-updated: 2026-03-11
+version: 1.3
+updated: 2026-06-21
 chars: ~800
 ---
 
 # Memory
+
+## Write Policy
+
+- Human-owned sections are everything outside the managed markers below.
+- Automatic memory sync may only replace content between
+  `<!-- rc:memory-auto-start -->` and `<!-- rc:memory-auto-end -->`.
+- If the markers are missing, append a new managed block; do not rewrite the
+  whole file.
+- Never persist API keys, approval tokens, redacted placeholders, raw logs,
+  local debugging transcripts, temporary hypotheses, or facts later corrected
+  by tool results.
+- Subagents, cron jobs, and background jobs must not update global memory unless
+  the parent task explicitly asks for memory capture.
 
 ## Global
 

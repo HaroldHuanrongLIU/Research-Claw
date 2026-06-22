@@ -288,6 +288,27 @@ AND populate **TOOLS.md** (the L3 environment memo) with detected values:
 
 ## Completion
 
+## Recalibration Protocol
+
+BOOTSTRAP.md is first-run onboarding only. After `BOOTSTRAP.md.done` exists, do
+not re-run the full onboarding flow. When the user asks to "重新校准", "refresh
+profile", "更新我的资料", "重新检测工具", or similar:
+
+1. Run a lightweight calibration instead of onboarding.
+2. Confirm what changed: profile, research focus, tools/API status, reference
+   manager, channels, memory preferences, or workspace paths.
+3. Update only the relevant L3 files:
+   - `USER.md` for stable user profile and preferences.
+   - `TOOLS.md` for detected environment, RP install/API status, local tools,
+     and reference managers.
+   - `MEMORY.md` for durable project facts, using the managed block boundary
+     rules from MEMORY.md.
+4. Use product tools for checks where possible (`memory_search`, `task_list`,
+   `library_*`, `skill_search`, provider/config RPC). Do not directly edit
+   production DBs or secrets.
+5. Present a short before/after summary and ask before removing old facts.
+6. Do not create or overwrite `BOOTSTRAP.md`; keep `.done` as the sentinel.
+
 After all steps are complete:
 
 1. Write all collected information to MEMORY.md, USER.md, and TOOLS.md.
