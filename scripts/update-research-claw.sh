@@ -13,6 +13,14 @@ if [[ ! -d .git ]]; then
 fi
 export PATH="$ROOT/node_modules/.bin:$PATH"
 
+# Never block on an interactive git credential prompt. The default remote is a
+# Gitee mirror that intermittently 401s for anonymous fetch; without this guard
+# `git pull` hangs on "Username for 'https://gitee.com':" instead of fast-failing
+# into the GitHub fallback below.
+export GIT_TERMINAL_PROMPT=0
+export GCM_INTERACTIVE=Never
+export GIT_ASKPASS=true
+
 GITHUB_REPO="https://github.com/wentorai/Research-Claw.git"
 
 OLD_HEAD=$(git rev-parse HEAD)

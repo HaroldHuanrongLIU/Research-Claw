@@ -21,6 +21,15 @@ Push-Location $ProjectRoot
 
 try {
     $env:PATH = (Join-Path $ProjectRoot 'node_modules' '.bin') + [IO.Path]::PathSeparator + $env:PATH
+
+    # Never block on an interactive git credential prompt. The default remote is a
+    # Gitee mirror that intermittently 401s for anonymous fetch; without this guard
+    # `git pull` hangs on "Username for 'https://gitee.com':" instead of fast-failing
+    # into the GitHub fallback below.
+    $env:GIT_TERMINAL_PROMPT = '0'
+    $env:GCM_INTERACTIVE = 'Never'
+    $env:GIT_ASKPASS = 'echo'
+
     $GithubRepo = "https://github.com/wentorai/Research-Claw.git"
 
     Write-Host "[update-research-claw] Pulling latest changes..." -ForegroundColor Cyan

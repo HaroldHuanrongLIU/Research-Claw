@@ -508,6 +508,17 @@ ensure_pnpm() {
 export COREPACK_ENABLE_STRICT=0
 export COREPACK_ENABLE_AUTO_PIN=0
 
+# --- Never let git block on an interactive credential prompt ---
+# The default remote is a Gitee mirror. Gitee intermittently returns HTTP 401 for
+# anonymous fetch (content review/freeze, WAF challenge, or rate-limit). Without
+# these guards, `git pull` opens /dev/tty and hangs forever on
+# "Username for 'https://gitee.com':" — note `2>/dev/null` does NOT suppress this,
+# the prompt is written to the terminal, not stderr. Disabling the prompt turns a
+# 401 into an immediate non-zero exit, which lets the GitHub-mirror fallback run.
+export GIT_TERMINAL_PROMPT=0
+export GCM_INTERACTIVE=Never
+export GIT_ASKPASS=true
+
 # --- [5/8] Clone or update ---
 if [ -d "$INSTALL_DIR/.git" ]; then
   info "Updating existing installation..."
@@ -533,7 +544,32 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   # Remove untracked files that may conflict with incoming changes.
   # Gitignored files (config, data, node_modules, workspace runtime) are preserved.
   git clean -fd 2>/dev/null || true
-  if ! (git pull --rebase --autostash 2>/dev/null || git pull); then
+
+  # --- Self-healing dual-remote update ---
+  # Try the existing origin first (Gitee for most installs). If it fails — most
+  # commonly a Gitee anonymous-fetch 401 that now fast-fails instead of hanging,
+  # thanks to GIT_TERMINAL_PROMPT=0 above — fall back to the GitHub mirror without
+  # permanently re-pointing origin, so a Gitee-only (GFW) machine still prefers
+  # Gitee on the next run. This mirrors the clone path's Gitee→GitHub fallback.
+  _BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+  [ "$_BRANCH" = "HEAD" ] && _BRANCH="main"
+  _PULLED=false
+  if git pull --rebase --autostash 2>/dev/null; then
+    _PULLED=true
+  else
+    git rebase --abort 2>/dev/null || true
+    git reset --hard HEAD 2>/dev/null || true
+    warn "Update from origin failed — trying GitHub mirror..."
+    git remote set-url github "$GITHUB_REPO" 2>/dev/null \
+      || git remote add github "$GITHUB_REPO" 2>/dev/null || true
+    if git fetch --depth 1 github "$_BRANCH" 2>/dev/null \
+       && (git reset --hard "github/$_BRANCH" 2>/dev/null || git reset --hard FETCH_HEAD 2>/dev/null); then
+      _PULLED=true
+      ok "Updated from GitHub mirror"
+    fi
+  fi
+
+  if ! $_PULLED; then
     warn "git pull failed. Possible causes:"
     warn "  - Network issue (try again later)"
     warn "  - VPN/proxy interference (try disabling VPN or switching to direct connection)"
